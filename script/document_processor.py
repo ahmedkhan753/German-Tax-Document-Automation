@@ -17,6 +17,14 @@ def get_base_path():
     # If running as a script (~/script/document_processor.py)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+def safe_pause(message="\nPress Enter to continue..."):
+    """Pauses the script only if stdin is available."""
+    if sys.stdin and sys.stdin.isatty():
+        try:
+            input(message)
+        except EOFError:
+            pass
+
 BASE_DIR = get_base_path()
 
 CONFIG = {
@@ -190,7 +198,7 @@ def validate_environment():
 
 if __name__ == "__main__":
     if not validate_environment():
-        input("\nPress Enter to exit...")
+        safe_pause("\nPress Enter to exit...")
         sys.exit(1)
         
     found_files = discover_files(CONFIG['input_dir'])
@@ -198,7 +206,7 @@ if __name__ == "__main__":
     if not found_files:
         logging.warning("No files found to process.")
         print("\nNo matching files found in the input directory.")
-        input("Press Enter to exit...")
+        safe_pause("Press Enter to exit...")
         sys.exit(0)
     
     # Process files type by type
@@ -236,4 +244,4 @@ if __name__ == "__main__":
             
     final_pdf = merge_pdfs(processed_files)
     print(f"\nSuccessfully created: {final_pdf}")
-    input("\nProcessing complete. Press Enter to exit...")
+    safe_pause("\nProcessing complete. Press Enter to exit...")
