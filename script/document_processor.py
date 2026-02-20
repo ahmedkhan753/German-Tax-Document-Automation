@@ -13,7 +13,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 def get_base_path():
     if getattr(sys, 'frozen', False):
         # If running as an EXE
-        return os.path.dirname(sys.executable)
+        exe_dir = os.path.dirname(sys.executable)
+        # If running from 'dist' folder, go one level up to project root
+        if os.path.basename(exe_dir).lower() == 'dist':
+            return os.path.dirname(exe_dir)
+        return exe_dir
     # If running as a script (~/script/document_processor.py)
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
