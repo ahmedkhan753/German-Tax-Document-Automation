@@ -49,6 +49,20 @@ def discover_files(input_dir):
     logging.info(f"Discovery complete. Found {len(found)} file types.")
     return found
 
+
+# function to convert word file to pdf file
+def convert_to_pdf(file_path):
+    if not file_path.endswith('.docx'):
+        return file_path  # Already PDF
+    try:
+        with NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
+            convert(file_path, temp_pdf.name)
+            logging.info(f"Converted {file_path} to {temp_pdf.name}")
+            return temp_pdf.name
+    except Exception as e:
+        logging.error(f"Conversion failed for {file_path}: {e}")
+        return None  # Skip on error
+
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
     print(found_files)  # e.g., {'anschreiben': 'Input/BaM_Anschreiben_2024.docx', ...}
