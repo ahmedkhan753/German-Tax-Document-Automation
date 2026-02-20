@@ -71,11 +71,26 @@ def convert_to_pdf(file_path):
             except: pass
         return None
 
-if __name__ == "__main__":
-    found_files = discover_files(CONFIG['input_dir'])
-    converted_files = {}
-    for doc_type, path in found_files.items():
-        pdf_path = convert_to_pdf(path)
-        if pdf_path:
-            converted_files[doc_type] = pdf_path
-    print(converted_files)
+# Fucntion to apply watermark
+def apply_watermark(pdf_path, doc_type):
+    watermark_path = os.path.join(CONFIG['watermark_dir'], CONFIG['document_types'][doc_type]['watermark'])
+    if doc_type == 'jahresabschluss':
+        return apply_special_watermark(pdf_path)  # Handle later
+    try:
+        with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            wm_reader = PyPDF2.PdfReader(wm_file)
+            wm_page = wm_reader.pages[0]  # Assume single-page watermark
+
+            writer = PyPDF2.PdfWriter()
+            for page in pdf_reader.pages:
+                page.merge_page(wm_page)  # Overlay
+                writer.add_page(page)
+
+            with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+                writer.write(output)
+                logging.info(f"Watermarked {pdf_path} as {output.name}")
+                return output.name
+    except Exception as e:
+        logging.error(f"Watermark failed for {pdf_path}: {e}")
+        return pdf_path  # Return original on failure
