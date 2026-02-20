@@ -9,9 +9,9 @@ from tempfile import NamedTemporaryFile
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 CONFIG = {
-    'input_dir': 'Input/Datens Franklin/',  # or use os.path.join for robustness
-    'output_dir': 'Output/',
-    'watermark_dir': 'Watermarks/',
+    'input_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'input', 'Daten Franklin'),
+    'output_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output'),
+    'watermark_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'watermarks'),
     # ... document_types dict with updated prefixes based on real files
     'document_types': {
         'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'WZ_Anschreiben.pdf', 'format': 'docx'},
@@ -26,15 +26,28 @@ CONFIG = {
 
 # File discovery function
 def discover_files(input_dir):
+    logging.info(f"Searching for files in: {os.path.abspath(input_dir)}")
     files_by_type = {t: None for t in CONFIG['document_types']}
+    
+    if not os.path.exists(input_dir):
+        logging.error(f"Input directory does not exist: {input_dir}")
+        return {}
+
     for file_path in glob.glob(os.path.join(input_dir, '*')):
-        filename_lower = os.path.basename(file_path).lower()
+        filename = os.path.basename(file_path)
+        filename_lower = filename.lower()
         for doc_type, info in CONFIG['document_types'].items():
-            if any(prefix.lower() in filename_lower for prefix in info.get('prefixes', [info['prefix']])):
+            prefixes = info.get('prefixes', [])
+            if any(prefix.lower() in filename_lower for prefix in prefixes):
                 if files_by_type[doc_type] is None:  # take first match
                     files_by_type[doc_type] = file_path
-                    logging.info(f"Matched {doc_type}: {file_path}")
-    return {k: v for k, v in files_by_type.items() if v is not None}
+                    logging.info(f"Matched {doc_type}: {filename}")
+                else:
+                    logging.debug(f"Skipping additional match for {doc_type}: {filename}")
+                    
+    found = {k: v for k, v in files_by_type.items() if v is not None}
+    logging.info(f"Discovery complete. Found {len(found)} file types.")
+    return found
 
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
