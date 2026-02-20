@@ -65,4 +65,9 @@ def convert_to_pdf(file_path):
 
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
-    print(found_files)  # e.g., {'anschreiben': 'Input/BaM_Anschreiben_2024.docx', ...}
+    converted_files = {}
+    for doc_type, path in found_files.items():
+        pdf_path = convert_to_pdf(path)
+        if pdf_path:
+            converted_files[doc_type] = pdf_path
+    print(converted_files)
