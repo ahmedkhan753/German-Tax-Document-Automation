@@ -163,8 +163,43 @@ def merge_pdfs(processed_files):
     logging.info(f"Merged PDF saved to {output_path}")
     return output_path
 
+def validate_environment():
+    """Ensure required directories exist and log environment info."""
+    logging.info(f"--- Environment Information ---")
+    logging.info(f"Base Directory: {BASE_DIR}")
+    logging.info(f"Running as EXE: {getattr(sys, 'frozen', False)}")
+    
+    # Ensure output directory exists
+    if not os.path.exists(CONFIG['output_dir']):
+        logging.info(f"Creating output directory: {CONFIG['output_dir']}")
+        os.makedirs(CONFIG['output_dir'], exist_ok=True)
+        
+    # Check input directory
+    if not os.path.exists(CONFIG['input_dir']):
+        logging.error(f"CRITICAL: Input directory not found: {CONFIG['input_dir']}")
+        print(f"\nERROR: Input directory not found!\nPlease make sure there is an 'input' folder containing 'Daten Franklin' at: {CONFIG['input_dir']}")
+        return False
+        
+    # Check watermark directory
+    if not os.path.exists(CONFIG['watermark_dir']):
+        logging.error(f"CRITICAL: Watermark directory not found: {CONFIG['watermark_dir']}")
+        print(f"\nERROR: Watermark directory not found!\nPlease make sure the 'watermarks' folder exists at: {CONFIG['watermark_dir']}")
+        return False
+        
+    return True
+
 if __name__ == "__main__":
+    if not validate_environment():
+        input("\nPress Enter to exit...")
+        sys.exit(1)
+        
     found_files = discover_files(CONFIG['input_dir'])
+    
+    if not found_files:
+        logging.warning("No files found to process.")
+        print("\nNo matching files found in the input directory.")
+        input("Press Enter to exit...")
+        sys.exit(0)
     
     # Process files type by type
     processed_files = {}
@@ -199,4 +234,6 @@ if __name__ == "__main__":
         if watermarked:
             processed_files[dt] = watermarked
             
-    merge_pdfs(processed_files)
+    final_pdf = merge_pdfs(processed_files)
+    print(f"\nSuccessfully created: {final_pdf}")
+    input("\nProcessing complete. Press Enter to exit...")
