@@ -94,3 +94,34 @@ def apply_watermark(pdf_path, doc_type):
     except Exception as e:
         logging.error(f"Watermark failed for {pdf_path}: {e}")
         return pdf_path  # Return original on failure
+
+# For special watermark logic
+def apply_special_watermark(pdf_path):
+    wm_deckblatt = os.path.join(CONFIG['watermark_dir'], 'WZ_Deckblatt.pdf')
+    wm_allgemein = os.path.join(CONFIG['watermark_dir'], 'WZ_Allgemein.pdf')
+    try:
+        with open(pdf_path, 'rb') as pdf_file:
+            reader = PyPDF2.PdfReader(pdf_file)
+            writer = PyPDF2.PdfWriter()
+
+            # Page 1: Deckblatt
+            if len(reader.pages) > 0:
+                page1 = reader.pages[0]
+                with open(wm_deckblatt, 'rb') as wm:
+                    wm_page = PyPDF2.PdfReader(wm).pages[0]
+                    page1.merge_page(wm_page)
+                writer.add_page(page1)
+
+            # Pages 2+: Allgemein
+            for page in reader.pages[1:]:
+                with open(wm_allgemein, 'rb') as wm:
+                    wm_page = PyPDF2.PdfReader(wm).pages[0]
+                    page.merge_page(wm_page)
+                writer.add_page(page)
+
+            with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+                writer.write(output)
+                return output.name
+    except Exception as e:
+        logging.error(f"Special watermark failed: {e}")
+        return pdf_path
