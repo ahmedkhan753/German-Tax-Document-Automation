@@ -52,16 +52,24 @@ def discover_files(input_dir):
 
 # function to convert word file to pdf file
 def convert_to_pdf(file_path):
-    if not file_path.endswith('.docx'):
+    if not file_path.lower().endswith('.docx'):
         return file_path  # Already PDF
     try:
+        # On Windows, we need to close the handle before docx2pdf can write to it
         with NamedTemporaryFile(suffix='.pdf', delete=False) as temp_pdf:
-            convert(file_path, temp_pdf.name)
-            logging.info(f"Converted {file_path} to {temp_pdf.name}")
-            return temp_pdf.name
+            temp_pdf_path = temp_pdf.name
+        
+        logging.info(f"Converting {os.path.basename(file_path)} to PDF...")
+        convert(file_path, temp_pdf_path)
+        logging.info(f"Successfully converted to {temp_pdf_path}")
+        return temp_pdf_path
     except Exception as e:
         logging.error(f"Conversion failed for {file_path}: {e}")
-        return None  # Skip on error
+        # Clean up temp file if it was created but conversion failed
+        if 'temp_pdf_path' in locals() and os.path.exists(temp_pdf_path):
+            try: os.remove(temp_pdf_path)
+            except: pass
+        return None
 
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
