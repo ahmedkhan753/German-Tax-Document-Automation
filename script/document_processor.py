@@ -97,30 +97,33 @@ def apply_watermark(pdf_path, doc_type):
 
 # For special watermark logic
 def apply_special_watermark(pdf_path):
-    wm_deckblatt = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
-    wm_allgemein = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
+    wm_deckblatt_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
+    wm_allgemein_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
     try:
-        with open(pdf_path, 'rb') as pdf_file:
+        with open(pdf_path, 'rb') as pdf_file, \
+             open(wm_deckblatt_path, 'rb') as wm_d_file, \
+             open(wm_allgemein_path, 'rb') as wm_a_file:
+            
             reader = PyPDF2.PdfReader(pdf_file)
             writer = PyPDF2.PdfWriter()
+            
+            wm_deckblatt_page = PyPDF2.PdfReader(wm_d_file).pages[0]
+            wm_allgemein_page = PyPDF2.PdfReader(wm_a_file).pages[0]
 
             # Page 1: Deckblatt
             if len(reader.pages) > 0:
                 page1 = reader.pages[0]
-                with open(wm_deckblatt, 'rb') as wm:
-                    wm_page = PyPDF2.PdfReader(wm).pages[0]
-                    page1.merge_page(wm_page)
+                page1.merge_page(wm_deckblatt_page)
                 writer.add_page(page1)
 
             # Pages 2+: Allgemein
             for page in reader.pages[1:]:
-                with open(wm_allgemein, 'rb') as wm:
-                    wm_page = PyPDF2.PdfReader(wm).pages[0]
-                    page.merge_page(wm_page)
+                page.merge_page(wm_allgemein_page)
                 writer.add_page(page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
+                logging.info(f"Special watermark applied to {pdf_path}")
                 return output.name
     except Exception as e:
         logging.error(f"Special watermark failed: {e}")
