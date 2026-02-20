@@ -15,37 +15,36 @@ CONFIG = {
     # ... document_types dict with updated prefixes based on real files
     'document_types': {
         'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'Wasserzeichen Anschreiben.pdf', 'format': 'docx'},
-        'jahresabschluss': {'prefixes': ['JA', 'Jahresabschluss', 'Offenlegung'], 'watermark': 'special', 'format': 'pdf'},
-        'kst': {'prefixes': ['KSt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
-        'ust': {'prefixes': ['USt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
-        'est': {'prefixes': ['ESt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},  # if appears later
-        'deckblatt': {'prefixes': ['Deckblatt'], 'watermark': 'Wasserzeichen Deckblatt.pdf', 'format': 'docx'}  # may be missing
+        'jahresabschluss': {'prefixes': ['JA ', 'Jahresabschluss', 'Offenlegung'], 'watermark': 'special', 'format': 'pdf'},
+        'kst': {'prefixes': ['KSt Erklärung'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
+        'ust': {'prefixes': ['USt Erklärung'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
+        'est': {'prefixes': ['ESt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
+        'deckblatt': {'prefixes': ['Deckblatt'], 'watermark': 'Wasserzeichen Deckblatt.pdf', 'format': 'docx'}
     },
-    'merge_order': ['anschreiben', 'deckblatt', 'kst', 'ust', 'est', 'jahresabschluss']  # logical order; confirm with client
+    'merge_order': ['anschreiben', 'deckblatt', 'kst', 'ust', 'est', 'jahresabschluss']
 }
 
 # File discovery function
 def discover_files(input_dir):
     logging.info(f"Searching for files in: {os.path.abspath(input_dir)}")
-    files_by_type = {t: None for t in CONFIG['document_types']}
+    files_by_type = {t: [] for t in CONFIG['document_types']}
     
     if not os.path.exists(input_dir):
         logging.error(f"Input directory does not exist: {input_dir}")
         return {}
 
-    for file_path in glob.glob(os.path.join(input_dir, '*')):
+    # Sort files to ensure stable discovery (e.g. JA 2024 comes before JA 2024_12)
+    files = sorted(glob.glob(os.path.join(input_dir, '*')))
+    for file_path in files:
         filename = os.path.basename(file_path)
         filename_lower = filename.lower()
         for doc_type, info in CONFIG['document_types'].items():
             prefixes = info.get('prefixes', [])
             if any(prefix.lower() in filename_lower for prefix in prefixes):
-                if files_by_type[doc_type] is None:  # take first match
-                    files_by_type[doc_type] = file_path
-                    logging.info(f"Matched {doc_type}: {filename}")
-                else:
-                    logging.debug(f"Skipping additional match for {doc_type}: {filename}")
+                files_by_type[doc_type].append(file_path)
+                logging.info(f"Matched {doc_type}: {filename}")
                     
-    found = {k: v for k, v in files_by_type.items() if v is not None}
+    found = {k: v for k, v in files_by_type.items() if v}
     logging.info(f"Discovery complete. Found {len(found)} file types.")
     return found
 
@@ -84,12 +83,19 @@ def apply_watermark(pdf_path, doc_type):
 
             writer = PyPDF2.PdfWriter()
             for page in pdf_reader.pages:
-                page.merge_page(wm_page)  # Overlay
-                writer.add_page(page)
+                # To put watermark UNDER, we merge the document page ON TOP of a copy of the watermark page
+                # This ensures the document text stays on top and dimensions are preserved
+                new_page = PyPDF2.PageObject.create_blank_page(
+                    width=page.mediabox.width, 
+                    height=page.mediabox.height
+                )
+                new_page.merge_page(wm_page) # Watermark first
+                new_page.merge_page(page)    # Document content on top
+                writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Watermarked {pdf_path} as {output.name}")
+                logging.info(f"Watermarked {os.path.basename(pdf_path)} for {doc_type}")
                 return output.name
     except Exception as e:
         logging.error(f"Watermark failed for {pdf_path}: {e}")
@@ -113,17 +119,21 @@ def apply_special_watermark(pdf_path):
             # Page 1: Deckblatt
             if len(reader.pages) > 0:
                 page1 = reader.pages[0]
-                page1.merge_page(wm_deckblatt_page)
-                writer.add_page(page1)
+                new_page1 = PyPDF2.PageObject.create_blank_page(width=page1.mediabox.width, height=page1.mediabox.height)
+                new_page1.merge_page(wm_deckblatt_page)
+                new_page1.merge_page(page1)
+                writer.add_page(new_page1)
 
             # Pages 2+: Allgemein
             for page in reader.pages[1:]:
-                page.merge_page(wm_allgemein_page)
-                writer.add_page(page)
+                new_page = PyPDF2.PageObject.create_blank_page(width=page.mediabox.width, height=page.mediabox.height)
+                new_page.merge_page(wm_allgemein_page)
+                new_page.merge_page(page)
+                writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Special watermark applied to {pdf_path}")
+                logging.info(f"Special watermark applied to {os.path.basename(pdf_path)}")
                 return output.name
     except Exception as e:
         logging.error(f"Special watermark failed: {e}")
@@ -145,12 +155,37 @@ def merge_pdfs(processed_files):
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
     
-    converted_files = {}
-    for dt, p in found_files.items():
-        pdf_path = convert_to_pdf(p)
-        if pdf_path:
-            converted_files[dt] = pdf_path
+    # Process files type by type
+    processed_files = {}
+    for dt in CONFIG['merge_order']:
+        if dt not in found_files:
+            continue
             
-    processed_files = {dt: apply_watermark(p, dt) for dt, p in converted_files.items()}
+        # Convert and collect all PDFs for this type
+        type_pdfs = []
+        for p in found_files[dt]:
+            pdf_path = convert_to_pdf(p)
+            if pdf_path:
+                type_pdfs.append(pdf_path)
+        
+        if not type_pdfs:
+            continue
+            
+        # If multiple files for this type, merge them first
+        if len(type_pdfs) > 1:
+            merger = PyPDF2.PdfMerger()
+            for pdf in type_pdfs:
+                merger.append(pdf)
+            with NamedTemporaryFile(suffix='.pdf', delete=False) as temp_merged:
+                merger.write(temp_merged)
+                section_pdf = temp_merged.name
+            logging.info(f"Merged {len(type_pdfs)} files for {dt}")
+        else:
+            section_pdf = type_pdfs[0]
+            
+        # Watermark the entire section
+        watermarked = apply_watermark(section_pdf, dt)
+        if watermarked:
+            processed_files[dt] = watermarked
+            
     merge_pdfs(processed_files)
-    # Cleanup temps (add os.remove for each temp path if tracked)
