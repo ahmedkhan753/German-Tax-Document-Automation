@@ -5,13 +5,24 @@ from docx2pdf import convert
 import PyPDF2
 from tempfile import NamedTemporaryFile
 
+import sys
+
 # Setup logging for debugging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        # If running as an EXE
+        return os.path.dirname(sys.executable)
+    # If running as a script (~/script/document_processor.py)
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+BASE_DIR = get_base_path()
+
 CONFIG = {
-    'input_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'input', 'Daten Franklin'),
-    'output_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'output'),
-    'watermark_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'watermarks'),
+    'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
+    'output_dir': os.path.join(BASE_DIR, 'output'),
+    'watermark_dir': os.path.join(BASE_DIR, 'watermarks'),
     # ... document_types dict with updated prefixes based on real files
     'document_types': {
         'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'Wasserzeichen Anschreiben.pdf', 'format': 'docx'},
