@@ -125,3 +125,16 @@ def apply_special_watermark(pdf_path):
     except Exception as e:
         logging.error(f"Special watermark failed: {e}")
         return pdf_path
+
+# fucntion to merge all pdf in proper order
+def merge_pdfs(processed_files):
+    merger = PyPDF2.PdfMerger()
+    for doc_type in CONFIG['merge_order']:
+        if doc_type in processed_files:
+            merger.append(processed_files[doc_type])
+            logging.info(f"Added {doc_type} to merge")
+    output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
+    with open(output_path, 'wb') as output:
+        merger.write(output)
+    logging.info(f"Merged PDF saved to {output_path}")
+    return output_path
