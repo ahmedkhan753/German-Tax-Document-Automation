@@ -14,12 +14,12 @@ CONFIG = {
     'watermark_dir': os.path.join(os.path.dirname(os.path.dirname(__file__)), 'watermarks'),
     # ... document_types dict with updated prefixes based on real files
     'document_types': {
-        'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'WZ_Anschreiben.pdf', 'format': 'docx'},
+        'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'Wasserzeichen Anschreiben.pdf', 'format': 'docx'},
         'jahresabschluss': {'prefixes': ['JA', 'Jahresabschluss', 'Offenlegung'], 'watermark': 'special', 'format': 'pdf'},
-        'kst': {'prefixes': ['KSt'], 'watermark': 'WZ_Allgemein.pdf', 'format': 'pdf'},
-        'ust': {'prefixes': ['USt'], 'watermark': 'WZ_Allgemein.pdf', 'format': 'pdf'},
-        'est': {'prefixes': ['ESt'], 'watermark': 'WZ_Allgemein.pdf', 'format': 'pdf'},  # if appears later
-        'deckblatt': {'prefixes': ['Deckblatt'], 'watermark': 'WZ_Deckblatt.pdf', 'format': 'docx'}  # may be missing
+        'kst': {'prefixes': ['KSt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
+        'ust': {'prefixes': ['USt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
+        'est': {'prefixes': ['ESt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},  # if appears later
+        'deckblatt': {'prefixes': ['Deckblatt'], 'watermark': 'Wasserzeichen Deckblatt.pdf', 'format': 'docx'}  # may be missing
     },
     'merge_order': ['anschreiben', 'deckblatt', 'kst', 'ust', 'est', 'jahresabschluss']  # logical order; confirm with client
 }
@@ -97,8 +97,8 @@ def apply_watermark(pdf_path, doc_type):
 
 # For special watermark logic
 def apply_special_watermark(pdf_path):
-    wm_deckblatt = os.path.join(CONFIG['watermark_dir'], 'WZ_Deckblatt.pdf')
-    wm_allgemein = os.path.join(CONFIG['watermark_dir'], 'WZ_Allgemein.pdf')
+    wm_deckblatt = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
+    wm_allgemein = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
     try:
         with open(pdf_path, 'rb') as pdf_file:
             reader = PyPDF2.PdfReader(pdf_file)
@@ -141,7 +141,13 @@ def merge_pdfs(processed_files):
 
 if __name__ == "__main__":
     found_files = discover_files(CONFIG['input_dir'])
-    converted_files = {dt: convert_to_pdf(p) for dt, p in found_files.items() if convert_to_pdf(p)}
+    
+    converted_files = {}
+    for dt, p in found_files.items():
+        pdf_path = convert_to_pdf(p)
+        if pdf_path:
+            converted_files[dt] = pdf_path
+            
     processed_files = {dt: apply_watermark(p, dt) for dt, p in converted_files.items()}
     merge_pdfs(processed_files)
     # Cleanup temps (add os.remove for each temp path if tracked)
