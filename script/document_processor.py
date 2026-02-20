@@ -138,3 +138,10 @@ def merge_pdfs(processed_files):
         merger.write(output)
     logging.info(f"Merged PDF saved to {output_path}")
     return output_path
+
+if __name__ == "__main__":
+    found_files = discover_files(CONFIG['input_dir'])
+    converted_files = {dt: convert_to_pdf(p) for dt, p in found_files.items() if convert_to_pdf(p)}
+    processed_files = {dt: apply_watermark(p, dt) for dt, p in converted_files.items()}
+    merge_pdfs(processed_files)
+    # Cleanup temps (add os.remove for each temp path if tracked)
