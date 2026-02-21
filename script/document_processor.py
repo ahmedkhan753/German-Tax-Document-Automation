@@ -78,6 +78,11 @@ CONFIG = {
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
+        'gewerbesteuer': {
+            'prefixes': ['GewSt', 'Gewerbesteuer'],
+            'watermark': 'Wasserzeichen Allgemein.pdf',
+            'format': 'pdf'
+        },
     },
     'merge_order': [
         'anschreiben', 
@@ -87,7 +92,8 @@ CONFIG = {
         'kst', 
         'kst_freizeichnung', 
         'ust', 
-        'ust_freizeichnung'
+        'ust_freizeichnung',
+        'gewerbesteuer'
     ]
 }
 
@@ -100,32 +106,31 @@ def discover_files(input_dir):
         logging.error(f"Input directory does not exist: {input_dir}")
         return {}
 
-    # Sort files to ensure stable discovery (e.g. JA 2024 comes before JA 2024_12)
+    # Get all files and sort them
     files = sorted(glob.glob(os.path.join(input_dir, '*')))
-    for file_path in files:
-        filename = os.path.basename(file_path)
-        filename_lower = filename.lower()
+    matched_paths = set()
+
+    # We iterate over merge_order to prioritize matching in that order if needed,
+    # but the primary goal is unique matching.
+    for doc_type in CONFIG['merge_order']:
+        info = CONFIG['document_types'][doc_type]
+        prefixes = info.get('prefixes', [])
+        excludes = info.get('exclude', [])
         
-        # Determine the best match by checking for prefixes AND excludes
-        matched_type = None
-        for doc_type, info in CONFIG['document_types'].items():
-            prefixes = info.get('prefixes', [])
-            excludes = info.get('exclude', [])
+        for file_path in files:
+            if file_path in matched_paths:
+                continue
+                
+            filename = os.path.basename(file_path).lower()
             
             # Check if any prefix matches
-            if any(prefix.lower() in filename_lower for prefix in prefixes):
+            if any(prefix.lower() in filename for prefix in prefixes):
                 # Check if any exclusion applies
-                if not any(exclude.lower() in filename_lower for exclude in excludes):
-                    # We found a match. For types like 'kst' vs 'kst_freizeichnung', 
-                    # the more specific one (freizeichnung) will match its own type 
-                    # because we added excludes to the general ones.
-                    matched_type = doc_type
-                    break
+                if not any(exclude.lower() in filename for exclude in excludes):
+                    files_by_type[doc_type].append(file_path)
+                    matched_paths.add(file_path)
+                    logging.info(f"Matched {doc_type}: {os.path.basename(file_path)}")
         
-        if matched_type:
-            files_by_type[matched_type].append(file_path)
-            logging.info(f"Matched {matched_type}: {filename}")
-                    
     found = {k: v for k, v in files_by_type.items() if v}
     logging.info(f"Discovery complete. Found {len(found)} file types.")
     return found
@@ -219,9 +224,15 @@ def merge_pdfs(processed_files):
             merger.append(processed_files[doc_type])
             logging.info(f"Added {doc_type} to merge")
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
-    with open(output_path, 'wb') as output:
-        merger.write(output)
-    logging.info(f"Merged PDF saved to {output_path}")
+    
+    # Ensure handle is closed after writing
+    try:
+        with open(output_path, 'wb') as output:
+            merger.write(output)
+        logging.info(f"Merged PDF saved to {output_path}")
+    except Exception as e:
+        logging.error(f"Failed to write final output: {e}")
+        return None
     return output_path
 
 def validate_environment():
@@ -296,5 +307,8 @@ if __name__ == "__main__":
             processed_files[dt] = watermarked
             
     final_pdf = merge_pdfs(processed_files)
-    print(f"\nSuccessfully created: {final_pdf}")
+    if final_pdf:
+        print(f"\nSuccessfully created: {final_pdf}")
+    else:
+        print("\nFailed to create final PDF.")
     safe_pause("\nProcessing complete. Press Enter to exit...")
