@@ -4,6 +4,10 @@ import logging
 from docx2pdf import convert
 import PyPDF2
 from tempfile import NamedTemporaryFile
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from reportlab.lib.colors import HexColor
+from io import BytesIO
 
 import sys
 
@@ -30,6 +34,11 @@ def safe_pause(message="\nPress Enter to continue..."):
             pass
 
 BASE_DIR = get_base_path()
+
+# Constants for the orange footer bar
+ORANGE_BAR_COLOR = HexColor('#f27f1c') 
+FOOTER_HEIGHT = 20
+LOGO_TEXT = "ZR"
 
 CONFIG = {
     'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
@@ -161,28 +170,82 @@ def convert_to_pdf(file_path):
 def apply_watermark(pdf_path, doc_type):
     watermark_file = CONFIG['document_types'][doc_type]['watermark']
     if watermark_file == 'special':
-        return apply_special_watermark(pdf_path)
+        base_watermarked = apply_special_watermark(pdf_path)
+    else:
+        watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
+        try:
+            with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
+                pdf_reader = PyPDF2.PdfReader(pdf_file)
+                wm_reader = PyPDF2.PdfReader(wm_file)
+                wm_page = wm_reader.pages[0]
+
+                writer = PyPDF2.PdfWriter()
+                for page in pdf_reader.pages:
+                    # Merge background watermark
+                    page.merge_page(wm_page)
+                    writer.add_page(page)
+
+                with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+                    writer.write(output)
+                    base_watermarked = output.name
+                    logging.info(f"Background watermark applied to {os.path.basename(pdf_path)}")
+        except Exception as e:
+            logging.error(f"Background watermark failed for {pdf_path}: {e}")
+            base_watermarked = pdf_path
+
+    # Apply the mandatory orange footer to every page
+    return apply_footer_to_pdf(base_watermarked)
+
+# Function to create the footer watermark in memory
+def create_footer_watermark(width, height):
+    packet = BytesIO()
+    can = canvas.Canvas(packet, pagesize=(width, height))
     
-    watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
+    # Draw orange bar at the bottom
+    can.setFillColor(ORANGE_BAR_COLOR)
+    can.rect(0, 0, width, FOOTER_HEIGHT, fill=1, stroke=0)
+    
+    # Draw Logo "Circle" area in middle
+    logo_radius = FOOTER_HEIGHT * 0.4
+    center_x = width / 2
+    center_y = FOOTER_HEIGHT / 2
+    
+    # Draw white-ish logo background (stylized)
+    can.setStrokeColor(HexColor('#ffffff'))
+    can.setLineWidth(1)
+    # The image shows a semi-circle or stylized logo, let's go for a white 'ZR' text
+    can.setFillColor(HexColor('#ffffff'))
+    # Use center alignment for text
+    can.setFont("Helvetica-Bold", FOOTER_HEIGHT * 0.6)
+    can.drawCentredString(center_x, center_y - (FOOTER_HEIGHT * 0.2), LOGO_TEXT)
+    
+    can.save()
+    packet.seek(0)
+    return PyPDF2.PdfReader(packet).pages[0]
+
+# Function to apply the generated footer to all pages of a PDF
+def apply_footer_to_pdf(input_pdf_path):
     try:
-        with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            wm_reader = PyPDF2.PdfReader(wm_file)
-            wm_page = wm_reader.pages[0]
-
+        with open(input_pdf_path, 'rb') as f:
+            reader = PyPDF2.PdfReader(f)
             writer = PyPDF2.PdfWriter()
-            for page in pdf_reader.pages:
-                # Merge watermark on top of the document page
-                page.merge_page(wm_page)
+            
+            for page in reader.pages:
+                # Use page dimensions to create a matching footer
+                # media_box gives [x, y, width, height]
+                width = float(page.mediabox.width)
+                height = float(page.mediabox.height)
+                
+                footer_page = create_footer_watermark(width, height)
+                page.merge_page(footer_page)
                 writer.add_page(page)
-
+            
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Watermarked {os.path.basename(pdf_path)} for {doc_type}")
                 return output.name
     except Exception as e:
-        logging.error(f"Watermark failed for {pdf_path}: {e}")
-        return pdf_path
+        logging.error(f"Footer application failed: {e}")
+        return input_pdf_path
 
 # For special watermark logic
 def apply_special_watermark(pdf_path):
@@ -210,10 +273,10 @@ def apply_special_watermark(pdf_path):
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Special watermark (JA) applied to {os.path.basename(pdf_path)}")
+                logging.info(f"Special background (JA) applied to {os.path.basename(pdf_path)}")
                 return output.name
     except Exception as e:
-        logging.error(f"Special watermark failed: {e}")
+        logging.error(f"Special background failed: {e}")
         return pdf_path
 
 # fucntion to merge all pdf in proper order
