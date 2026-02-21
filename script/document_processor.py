@@ -35,16 +35,60 @@ CONFIG = {
     'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
     'output_dir': os.path.join(BASE_DIR, 'output'),
     'watermark_dir': os.path.join(BASE_DIR, 'watermarks'),
-    # ... document_types dict with updated prefixes based on real files
     'document_types': {
-        'anschreiben': {'prefixes': ['BaM', 'Übersendung'], 'watermark': 'Wasserzeichen Anschreiben.pdf', 'format': 'docx'},
-        'jahresabschluss': {'prefixes': ['JA ', 'Jahresabschluss', 'Offenlegung'], 'watermark': 'special', 'format': 'pdf'},
-        'kst': {'prefixes': ['KSt Erklärung'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
-        'ust': {'prefixes': ['USt Erklärung'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
-        'est': {'prefixes': ['ESt'], 'watermark': 'Wasserzeichen Allgemein.pdf', 'format': 'pdf'},
-        'deckblatt': {'prefixes': ['Deckblatt'], 'watermark': 'Wasserzeichen Deckblatt.pdf', 'format': 'docx'}
+        'anschreiben': {
+            'prefixes': ['BaM', 'Übersendung'], 
+            'watermark': 'Wasserzeichen Anschreiben.pdf', 
+            'format': 'docx'
+        },
+        'jahresabschluss': {
+            'prefixes': ['JA Jahresabschluss', 'JA Abschluss'], 
+            'watermark': 'special', 
+            'format': 'pdf'
+        },
+        'offenlegung': {
+            'prefixes': ['JA Offenlegung'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'deckblatt_steuererklaerung': {
+            'prefixes': ['Deckblatt Steuererklärung'], 
+            'watermark': 'Wasserzeichen Deckblatt.pdf', 
+            'format': 'docx'
+        },
+        'kst': {
+            'prefixes': ['KSt Erklärung'], 
+            'exclude': ['Freizeichnungsdokument'],
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'kst_freizeichnung': {
+            'prefixes': ['KSt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'ust': {
+            'prefixes': ['USt Erklärung'], 
+            'exclude': ['Freizeichnungsdokument'],
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'ust_freizeichnung': {
+            'prefixes': ['USt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
     },
-    'merge_order': ['anschreiben', 'deckblatt', 'kst', 'ust', 'est', 'jahresabschluss']
+    'merge_order': [
+        'anschreiben', 
+        'jahresabschluss', 
+        'offenlegung', 
+        'deckblatt_steuererklaerung', 
+        'kst', 
+        'kst_freizeichnung', 
+        'ust', 
+        'ust_freizeichnung'
+    ]
 }
 
 # File discovery function
@@ -61,11 +105,26 @@ def discover_files(input_dir):
     for file_path in files:
         filename = os.path.basename(file_path)
         filename_lower = filename.lower()
+        
+        # Determine the best match by checking for prefixes AND excludes
+        matched_type = None
         for doc_type, info in CONFIG['document_types'].items():
             prefixes = info.get('prefixes', [])
+            excludes = info.get('exclude', [])
+            
+            # Check if any prefix matches
             if any(prefix.lower() in filename_lower for prefix in prefixes):
-                files_by_type[doc_type].append(file_path)
-                logging.info(f"Matched {doc_type}: {filename}")
+                # Check if any exclusion applies
+                if not any(exclude.lower() in filename_lower for exclude in excludes):
+                    # We found a match. For types like 'kst' vs 'kst_freizeichnung', 
+                    # the more specific one (freizeichnung) will match its own type 
+                    # because we added excludes to the general ones.
+                    matched_type = doc_type
+                    break
+        
+        if matched_type:
+            files_by_type[matched_type].append(file_path)
+            logging.info(f"Matched {matched_type}: {filename}")
                     
     found = {k: v for k, v in files_by_type.items() if v}
     logging.info(f"Discovery complete. Found {len(found)} file types.")
@@ -95,26 +154,22 @@ def convert_to_pdf(file_path):
 
 # Fucntion to apply watermark
 def apply_watermark(pdf_path, doc_type):
-    watermark_path = os.path.join(CONFIG['watermark_dir'], CONFIG['document_types'][doc_type]['watermark'])
-    if doc_type == 'jahresabschluss':
-        return apply_special_watermark(pdf_path)  # Handle later
+    watermark_file = CONFIG['document_types'][doc_type]['watermark']
+    if watermark_file == 'special':
+        return apply_special_watermark(pdf_path)
+    
+    watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
     try:
         with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             wm_reader = PyPDF2.PdfReader(wm_file)
-            wm_page = wm_reader.pages[0]  # Assume single-page watermark
+            wm_page = wm_reader.pages[0]
 
             writer = PyPDF2.PdfWriter()
             for page in pdf_reader.pages:
-                # To put watermark UNDER, we merge the document page ON TOP of a copy of the watermark page
-                # This ensures the document text stays on top and dimensions are preserved
-                new_page = PyPDF2.PageObject.create_blank_page(
-                    width=page.mediabox.width, 
-                    height=page.mediabox.height
-                )
-                new_page.merge_page(wm_page) # Watermark first
-                new_page.merge_page(page)    # Document content on top
-                writer.add_page(new_page)
+                # Merge watermark on top of the document page
+                page.merge_page(wm_page)
+                writer.add_page(page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
@@ -122,7 +177,7 @@ def apply_watermark(pdf_path, doc_type):
                 return output.name
     except Exception as e:
         logging.error(f"Watermark failed for {pdf_path}: {e}")
-        return pdf_path  # Return original on failure
+        return pdf_path
 
 # For special watermark logic
 def apply_special_watermark(pdf_path):
@@ -139,24 +194,18 @@ def apply_special_watermark(pdf_path):
             wm_deckblatt_page = PyPDF2.PdfReader(wm_d_file).pages[0]
             wm_allgemein_page = PyPDF2.PdfReader(wm_a_file).pages[0]
 
-            # Page 1: Deckblatt
-            if len(reader.pages) > 0:
-                page1 = reader.pages[0]
-                new_page1 = PyPDF2.PageObject.create_blank_page(width=page1.mediabox.width, height=page1.mediabox.height)
-                new_page1.merge_page(wm_deckblatt_page)
-                new_page1.merge_page(page1)
-                writer.add_page(new_page1)
-
-            # Pages 2+: Allgemein
-            for page in reader.pages[1:]:
-                new_page = PyPDF2.PageObject.create_blank_page(width=page.mediabox.width, height=page.mediabox.height)
-                new_page.merge_page(wm_allgemein_page)
-                new_page.merge_page(page)
-                writer.add_page(new_page)
+            for i, page in enumerate(reader.pages):
+                if i == 0:
+                    # Page 1: Deckblatt
+                    page.merge_page(wm_deckblatt_page)
+                else:
+                    # Pages 2+: Allgemein
+                    page.merge_page(wm_allgemein_page)
+                writer.add_page(page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Special watermark applied to {os.path.basename(pdf_path)}")
+                logging.info(f"Special watermark (JA) applied to {os.path.basename(pdf_path)}")
                 return output.name
     except Exception as e:
         logging.error(f"Special watermark failed: {e}")

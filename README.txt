@@ -19,4 +19,4 @@ README: Document Processor Automation Tool
   - 'Wasserzeichen Deckblatt.pdf'
   - 'Wasserzeichen Allgemein.pdf'
 
-Contact for issues: Ahmed Khan
+Contact for issues
