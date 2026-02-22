@@ -38,13 +38,18 @@ BASE_DIR = get_base_path()
 # Constants for the orange footer bar
 ORANGE_BAR_COLOR = HexColor('#f27f1c') 
 FOOTER_HEIGHT = 20
-LOGO_TEXT = "ZR"
+LOGO_TEXT = ""
 
 CONFIG = {
     'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
     'output_dir': os.path.join(BASE_DIR, 'output'),
     'watermark_dir': os.path.join(BASE_DIR, 'watermarks'),
     'document_types': {
+        'cover_page': {
+            'prefixes': ['Cover Page'],
+            'watermark': 'Wasserzeichen Deckblatt.pdf',
+            'format': 'docx'
+        },
         'anschreiben': {
             'prefixes': ['BaM', 'Übersendung'], 
             'watermark': 'Wasserzeichen Anschreiben.pdf', 
@@ -94,6 +99,7 @@ CONFIG = {
         },
     },
     'merge_order': [
+        'cover_page',
         'anschreiben', 
         'jahresabschluss', 
         'offenlegung', 
@@ -181,14 +187,32 @@ def apply_watermark(pdf_path, doc_type):
 
                 writer = PyPDF2.PdfWriter()
                 for page in pdf_reader.pages:
-                    # Merge background watermark
-                    page.merge_page(wm_page)
-                    writer.add_page(page)
+                    target_width = float(page.mediabox.width)
+                    target_height = float(page.mediabox.height)
+                    
+                    wm_width = float(wm_page.mediabox.width)
+                    wm_height = float(wm_page.mediabox.height)
+                    
+                    # Calculate scaling factors to maintain aspect ratio and fit within target
+                    scale = min(target_width / wm_width, target_height / wm_height)
+                    
+                    # Centering offsets
+                    off_x = (target_width - (wm_width * scale)) / 2
+                    off_y = (target_height - (wm_height * scale)) / 2
+                    
+                    # Create a copy of the watermark page and scale/center it
+                    wm_page.add_transformation(PyPDF2.Transformation().scale(scale).translate(off_x, off_y))
+                    
+                    # Merge background watermark and original content
+                    new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                    new_page.merge_page(wm_page)
+                    new_page.merge_page(page)
+                    writer.add_page(new_page)
 
                 with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                     writer.write(output)
                     base_watermarked = output.name
-                    logging.info(f"Background watermark applied to {os.path.basename(pdf_path)}")
+                    logging.info(f"Scaled and centered background watermark applied to {os.path.basename(pdf_path)}")
         except Exception as e:
             logging.error(f"Background watermark failed for {pdf_path}: {e}")
             base_watermarked = pdf_path
@@ -263,13 +287,24 @@ def apply_special_watermark(pdf_path):
             wm_allgemein_page = PyPDF2.PdfReader(wm_a_file).pages[0]
 
             for i, page in enumerate(reader.pages):
-                if i == 0:
-                    # Page 1: Deckblatt
-                    page.merge_page(wm_deckblatt_page)
-                else:
-                    # Pages 2+: Allgemein
-                    page.merge_page(wm_allgemein_page)
-                writer.add_page(page)
+                target_width = float(page.mediabox.width)
+                target_height = float(page.mediabox.height)
+                
+                wm_to_use = wm_deckblatt_page if i == 0 else wm_allgemein_page
+                wm_width = float(wm_to_use.mediabox.width)
+                wm_height = float(wm_to_use.mediabox.height)
+                
+                # Aspect ratio scaling
+                scale = min(target_width / wm_width, target_height / wm_height)
+                off_x = (target_width - (wm_width * scale)) / 2
+                off_y = (target_height - (wm_height * scale)) / 2
+                
+                wm_to_use.add_transformation(PyPDF2.Transformation().scale(scale).translate(off_x, off_y))
+                
+                new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                new_page.merge_page(wm_to_use)
+                new_page.merge_page(page)
+                writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)

@@ -7,7 +7,7 @@ import os
 # Copy logic from document_processor.py for verification
 ORANGE_BAR_COLOR = HexColor('#f27f1c') 
 FOOTER_HEIGHT = 20
-LOGO_TEXT = "ZR"
+LOGO_TEXT = ""
 
 def create_footer_watermark(width, height):
     packet = BytesIO()
