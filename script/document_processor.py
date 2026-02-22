@@ -37,7 +37,7 @@ BASE_DIR = get_base_path()
 
 # Constants for the orange footer bar
 ORANGE_BAR_COLOR = HexColor('#f27f1c') 
-FOOTER_HEIGHT = 25
+FOOTER_HEIGHT = 30
 LOGO_TEXT = ""
 
 CONFIG = {
@@ -66,7 +66,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word'], 
+            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
         },
@@ -260,13 +260,30 @@ def apply_footer_to_pdf(input_pdf_path):
             reader = PyPDF2.PdfReader(f)
             writer = PyPDF2.PdfWriter()
             
-            for page in reader.pages:
-                # Use page dimensions to create a matching footer
-                # media_box gives [x, y, width, height]
+            page_count = len(reader.pages)
+            logging.info(f"Applying footers to {page_count} pages in {os.path.basename(input_pdf_path)}")
+            
+            for i, page in enumerate(reader.pages):
+                # Handle possible rotation
+                rotation = page.get('/Rotate', 0)
                 width = float(page.mediabox.width)
                 height = float(page.mediabox.height)
                 
+                # Create a footer that matches the current page orientation
+                # We always create it with the original width/height
                 footer_page = create_footer_watermark(width, height)
+                
+                # Apply rotation to footer if necessary
+                if rotation == 90:
+                    # Visual bottom is original right edge
+                    footer_page.add_transformation(PyPDF2.Transformation().rotate(90).translate(width, 0))
+                elif rotation == 180:
+                    # Visual bottom is original top edge
+                    footer_page.add_transformation(PyPDF2.Transformation().rotate(180).translate(width, height))
+                elif rotation == 270:
+                    # Visual bottom is original left edge
+                    footer_page.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, height))
+                
                 page.merge_page(footer_page)
                 writer.add_page(page)
             
@@ -327,18 +344,31 @@ def apply_special_watermark(pdf_path):
 
 # fucntion to merge all pdf in proper order
 def merge_pdfs(processed_files):
+    logging.info("Starting final merge process...")
     merger = PyPDF2.PdfMerger()
+    added_count = 0
+    
+    # We use a set to ensure unique additions, though merge_order should handle it
+    already_added = set()
+    
     for doc_type in CONFIG['merge_order']:
-        if doc_type in processed_files:
+        if doc_type in processed_files and doc_type not in already_added:
             merger.append(processed_files[doc_type])
-            logging.info(f"Added {doc_type} to merge")
+            already_added.add(doc_type)
+            added_count += 1
+            logging.info(f"SEQUENCE [{added_count}]: Added {doc_type} to merge")
+            
+    if added_count == 0:
+        logging.error("No processed files found to merge!")
+        return None
+        
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
     
-    # Ensure handle is closed after writing
     try:
         with open(output_path, 'wb') as output:
             merger.write(output)
-        logging.info(f"Merged PDF saved to {output_path}")
+        merger.close()
+        logging.info(f"Successfully merged {added_count} sections into {output_path}")
     except Exception as e:
         logging.error(f"Failed to write final output: {e}")
         return None
