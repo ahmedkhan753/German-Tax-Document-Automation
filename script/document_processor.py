@@ -111,6 +111,19 @@ CONFIG = {
     ]
 }
 
+# File priority for discovery (to handle overlaps like 440368)
+DISCOVERY_ORDER = [
+    'deckblatt_steuererklaerung',
+    'anschreiben',
+    'jahresabschluss',
+    'offenlegung',
+    'kst_freizeichnung',
+    'kst',
+    'ust_freizeichnung',
+    'ust',
+    'gewerbesteuer'
+]
+
 # File discovery function
 def discover_files(input_dir):
     logging.info(f"Searching for files in: {os.path.abspath(input_dir)}")
@@ -126,7 +139,8 @@ def discover_files(input_dir):
 
     # We iterate over merge_order to prioritize matching in that order if needed,
     # but the primary goal is unique matching.
-    for doc_type in CONFIG['merge_order']:
+    # Use DISCOVERY_ORDER to handle overlaps (like 440368) correctly
+    for doc_type in DISCOVERY_ORDER:
         info = CONFIG['document_types'][doc_type]
         prefixes = info.get('prefixes', [])
         excludes = info.get('exclude', [])
@@ -193,32 +207,32 @@ def apply_watermark(pdf_path, doc_type):
                     wm_width = float(wm_page.mediabox.width)
                     wm_height = float(wm_page.mediabox.height)
                     
-                    # Calculate scaling factors
                     scale = min(target_width / wm_width, target_height / wm_height)
                     off_x = (target_width - (wm_width * scale)) / 2
                     off_y = (target_height - (wm_height * scale)) / 2
                     
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create a fresh overlay page each time to avoid accumulation
-                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                    wm_overlay.merge_page(wm_page)
+                    # 1. Background Watermark (might be hidden by opaque content)
+                    bg_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                    bg_page.merge_page(wm_page)
+                    bg_page.add_transformation(trans)
                     
-                    # Handle rotation for the overlay if the source page is rotated
-                    if rotation == 90:
-                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
-                    elif rotation == 180:
-                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
-                    elif rotation == 270:
-                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
+                    # Apply rotation to background if needed
+                    if rotation != 0:
+                        if rotation == 90: bg_page.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
+                        elif rotation == 180: bg_page.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
+                        elif rotation == 270: bg_page.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
+
+                    # 2. Forensic Branding (Surgical Foreground Overlay)
+                    # We draw the orange bars manually to ensure transparency in the content area
+                    surgical_overlay = create_surgical_branding_overlay(target_width, target_height, rotation)
                     
-                    # Apply scaling/centering transformation
-                    wm_overlay.add_transformation(trans)
-                    
-                    # FOREGROUND MERGE: Merge original page first, then watermark overlay on top
+                    # 3. Assemble the sandwich: BG -> Content -> Surgical FG
                     new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                    new_page.merge_page(bg_page)
                     new_page.merge_page(page)
-                    new_page.merge_page(wm_overlay)
+                    new_page.merge_page(surgical_overlay)
                     writer.add_page(new_page)
 
                 with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
@@ -232,28 +246,45 @@ def apply_watermark(pdf_path, doc_type):
     return base_watermarked
 
 # Function to create the footer watermark in memory
-def create_footer_watermark(width, height):
+def create_surgical_branding_overlay(width, height, rotation=0):
     packet = BytesIO()
     can = canvas.Canvas(packet, pagesize=(width, height))
     
-    # Draw orange bar at the bottom
+    # Define surgical branding (top/bottom bars)
+    bar_h = FOOTER_HEIGHT
+    
+    # Fill top bar
+    can.setFillColor(ORANGE_BAR_COLOR)
+    can.rect(0, height - bar_h, width, bar_h, fill=1, stroke=0)
+    
+    # Fill bottom bar
+    can.rect(0, 0, width, bar_h, fill=1, stroke=0)
+    
+    # Draw Logo/Text in bottom bar
+    can.setFillColor(HexColor('#ffffff'))
+    can.setFont("Helvetica-Bold", bar_h * 0.6)
+    can.drawCentredString(width / 2, bar_h * 0.3, LOGO_TEXT)
+    
+    can.save()
+    packet.seek(0)
+    fg_page = PyPDF2.PdfReader(packet).pages[0]
+    
+    # Handle rotation for the overlay itself so it matches the content
+    if rotation == 90:
+        fg_page.add_transformation(PyPDF2.Transformation().rotate(90).translate(width, 0))
+    elif rotation == 180:
+        fg_page.add_transformation(PyPDF2.Transformation().rotate(180).translate(width, height))
+    elif rotation == 270:
+        fg_page.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, height))
+        
+    return fg_page
+
+def create_footer_watermark(width, height):
+    # Keep for backward compatibility if needed, but we use surgical instead
+    packet = BytesIO()
+    can = canvas.Canvas(packet, pagesize=(width, height))
     can.setFillColor(ORANGE_BAR_COLOR)
     can.rect(0, 0, width, FOOTER_HEIGHT, fill=1, stroke=0)
-    
-    # Draw Logo "Circle" area in middle
-    logo_radius = FOOTER_HEIGHT * 0.4
-    center_x = width / 2
-    center_y = FOOTER_HEIGHT / 2
-    
-    # Draw white-ish logo background (stylized)
-    can.setStrokeColor(HexColor('#ffffff'))
-    can.setLineWidth(1)
-    # The image shows a semi-circle or stylized logo, let's go for a white 'ZR' text
-    can.setFillColor(HexColor('#ffffff'))
-    # Use center alignment for text
-    can.setFont("Helvetica-Bold", FOOTER_HEIGHT * 0.6)
-    can.drawCentredString(center_x, center_y - (FOOTER_HEIGHT * 0.2), LOGO_TEXT)
-    
     can.save()
     packet.seek(0)
     return PyPDF2.PdfReader(packet).pages[0]
@@ -323,32 +354,30 @@ def apply_special_watermark(pdf_path):
                 wm_width = float(wm_to_use.mediabox.width)
                 wm_height = float(wm_to_use.mediabox.height)
                 
-                # Aspect ratio scaling
                 scale = min(target_width / wm_width, target_height / wm_height)
                 off_x = (target_width - (wm_width * scale)) / 2
                 off_y = (target_height - (wm_height * scale)) / 2
-                
                 trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                 
-                # Create a fresh overlay page each time to avoid accumulation
-                wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                wm_overlay.merge_page(wm_to_use)
+                # 1. Background
+                bg_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                bg_page.merge_page(wm_to_use)
+                bg_page.add_transformation(trans)
                 
-                # Handle rotation for the overlay
-                if rotation == 90:
-                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
-                elif rotation == 180:
-                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
-                elif rotation == 270:
-                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
+                # Apply rotation to BG
+                if rotation != 0:
+                    if rotation == 90: bg_page.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
+                    elif rotation == 180: bg_page.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
+                    elif rotation == 270: bg_page.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
 
-                # Apply scaling/centering
-                wm_overlay.add_transformation(trans)
+                # 2. Foreground Branding
+                surgical_overlay = create_surgical_branding_overlay(target_width, target_height, rotation)
                 
-                # FOREGROUND MERGE
+                # 3. Assemble
                 new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                new_page.merge_page(bg_page)
                 new_page.merge_page(page)
-                new_page.merge_page(wm_overlay)
+                new_page.merge_page(surgical_overlay)
                 writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
