@@ -16,9 +16,17 @@ def apply_watermark_logic(target_page, wm_page):
     off_x = (target_width - (wm_width * scale)) / 2
     off_y = (target_height - (wm_height * scale)) / 2
     
-    wm_page.add_transformation(PyPDF2.Transformation().scale(scale).translate(off_x, off_y))
+    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+    # 1. Create a blank page for the watermark overlay
+    wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+    # 2. Merge the watermark onto the overlay
+    wm_overlay.merge_page(wm_page)
+    # 3. Transform the overlay
+    wm_overlay.add_transformation(trans)
+    
+    # 4. Merge overlay and target content
     new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-    new_page.merge_page(wm_page)
+    new_page.merge_page(wm_overlay)
     new_page.merge_page(target_page)
     return new_page
 

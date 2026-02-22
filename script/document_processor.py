@@ -37,7 +37,7 @@ BASE_DIR = get_base_path()
 
 # Constants for the orange footer bar
 ORANGE_BAR_COLOR = HexColor('#f27f1c') 
-FOOTER_HEIGHT = 20
+FOOTER_HEIGHT = 25
 LOGO_TEXT = ""
 
 CONFIG = {
@@ -66,7 +66,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt Steuererklärung'], 
+            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
         },
@@ -99,8 +99,7 @@ CONFIG = {
         },
     },
     'merge_order': [
-        'cover_page',
-        'anschreiben', 
+        'anschreiben',
         'jahresabschluss', 
         'offenlegung', 
         'deckblatt_steuererklaerung', 
@@ -200,12 +199,19 @@ def apply_watermark(pdf_path, doc_type):
                     off_x = (target_width - (wm_width * scale)) / 2
                     off_y = (target_height - (wm_height * scale)) / 2
                     
-                    # Create a copy of the watermark page and scale/center it
-                    wm_page.add_transformation(PyPDF2.Transformation().scale(scale).translate(off_x, off_y))
+                    # Create transformation object
+                    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Merge background watermark and original content
+                    # 1. Create a blank page for the watermark overlay
+                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                    # 2. Merge the watermark onto the overlay
+                    wm_overlay.merge_page(wm_page)
+                    # 3. Transform the overlay (safe for shared source)
+                    wm_overlay.add_transformation(trans)
+                    
+                    # 4. Merge overlay and original content
                     new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                    new_page.merge_page(wm_page)
+                    new_page.merge_page(wm_overlay)
                     new_page.merge_page(page)
                     writer.add_page(new_page)
 
@@ -299,10 +305,15 @@ def apply_special_watermark(pdf_path):
                 off_x = (target_width - (wm_width * scale)) / 2
                 off_y = (target_height - (wm_height * scale)) / 2
                 
-                wm_to_use.add_transformation(PyPDF2.Transformation().scale(scale).translate(off_x, off_y))
+                trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+                
+                # Create a fresh overlay page each time to avoid accumulation
+                wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
+                wm_overlay.merge_page(wm_to_use)
+                wm_overlay.add_transformation(trans)
                 
                 new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                new_page.merge_page(wm_to_use)
+                new_page.merge_page(wm_overlay)
                 new_page.merge_page(page)
                 writer.add_page(new_page)
 
