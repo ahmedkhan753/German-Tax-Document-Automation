@@ -24,10 +24,10 @@ def apply_watermark_logic(target_page, wm_page):
     # 3. Transform the overlay
     wm_overlay.add_transformation(trans)
     
-    # 4. Merge overlay and target content
+    # 4. FOREGROUND MERGE
     new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-    new_page.merge_page(wm_overlay)
     new_page.merge_page(target_page)
+    new_page.merge_page(wm_overlay)
     return new_page
 
 def create_dummy_pdf(width, height, text):

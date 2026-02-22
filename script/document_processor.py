@@ -185,34 +185,40 @@ def apply_watermark(pdf_path, doc_type):
                 wm_page = wm_reader.pages[0]
 
                 writer = PyPDF2.PdfWriter()
-                for page in pdf_reader.pages:
+                for i, page in enumerate(pdf_reader.pages):
                     target_width = float(page.mediabox.width)
                     target_height = float(page.mediabox.height)
+                    rotation = page.get('/Rotate', 0)
                     
                     wm_width = float(wm_page.mediabox.width)
                     wm_height = float(wm_page.mediabox.height)
                     
-                    # Calculate scaling factors to maintain aspect ratio and fit within target
+                    # Calculate scaling factors
                     scale = min(target_width / wm_width, target_height / wm_height)
-                    
-                    # Centering offsets
                     off_x = (target_width - (wm_width * scale)) / 2
                     off_y = (target_height - (wm_height * scale)) / 2
                     
-                    # Create transformation object
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # 1. Create a blank page for the watermark overlay
+                    # Create a fresh overlay page each time to avoid accumulation
                     wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                    # 2. Merge the watermark onto the overlay
                     wm_overlay.merge_page(wm_page)
-                    # 3. Transform the overlay (safe for shared source)
+                    
+                    # Handle rotation for the overlay if the source page is rotated
+                    if rotation == 90:
+                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
+                    elif rotation == 180:
+                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
+                    elif rotation == 270:
+                        wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
+                    
+                    # Apply scaling/centering transformation
                     wm_overlay.add_transformation(trans)
                     
-                    # 4. Merge overlay and original content
+                    # FOREGROUND MERGE: Merge original page first, then watermark overlay on top
                     new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                    new_page.merge_page(wm_overlay)
                     new_page.merge_page(page)
+                    new_page.merge_page(wm_overlay)
                     writer.add_page(new_page)
 
                 with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
@@ -223,8 +229,7 @@ def apply_watermark(pdf_path, doc_type):
             logging.error(f"Background watermark failed for {pdf_path}: {e}")
             base_watermarked = pdf_path
 
-    # Apply the mandatory orange footer to every page
-    return apply_footer_to_pdf(base_watermarked)
+    return base_watermarked
 
 # Function to create the footer watermark in memory
 def create_footer_watermark(width, height):
@@ -312,6 +317,7 @@ def apply_special_watermark(pdf_path):
             for i, page in enumerate(reader.pages):
                 target_width = float(page.mediabox.width)
                 target_height = float(page.mediabox.height)
+                rotation = page.get('/Rotate', 0)
                 
                 wm_to_use = wm_deckblatt_page if i == 0 else wm_allgemein_page
                 wm_width = float(wm_to_use.mediabox.width)
@@ -327,11 +333,22 @@ def apply_special_watermark(pdf_path):
                 # Create a fresh overlay page each time to avoid accumulation
                 wm_overlay = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
                 wm_overlay.merge_page(wm_to_use)
+                
+                # Handle rotation for the overlay
+                if rotation == 90:
+                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(target_width, 0))
+                elif rotation == 180:
+                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(target_width, target_height))
+                elif rotation == 270:
+                    wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, target_height))
+
+                # Apply scaling/centering
                 wm_overlay.add_transformation(trans)
                 
+                # FOREGROUND MERGE
                 new_page = PyPDF2.PageObject.create_blank_page(width=target_width, height=target_height)
-                new_page.merge_page(wm_overlay)
                 new_page.merge_page(page)
+                new_page.merge_page(wm_overlay)
                 writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
