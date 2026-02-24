@@ -46,7 +46,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover'], 
+            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'Deckblatt Einkommensteuer'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
         },
@@ -58,6 +58,17 @@ CONFIG = {
         },
         'kst_freizeichnung': {
             'prefixes': ['KSt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'est': {
+            'prefixes': ['ESt Erklärung'], 
+            'exclude': ['Freizeichnungsdokument'],
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'est_freizeichnung': {
+            'prefixes': ['ESt Erklärung Freizeichnungsdokument'], 
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
@@ -85,6 +96,8 @@ CONFIG = {
         'deckblatt_steuererklaerung', 
         'kst', 
         'kst_freizeichnung', 
+        'est',
+        'est_freizeichnung',
         'ust', 
         'ust_freizeichnung',
         'gewerbesteuer'
@@ -99,6 +112,8 @@ DISCOVERY_ORDER = [
     'offenlegung',
     'kst_freizeichnung',
     'kst',
+    'est_freizeichnung',
+    'est',
     'ust_freizeichnung',
     'ust',
     'gewerbesteuer'
