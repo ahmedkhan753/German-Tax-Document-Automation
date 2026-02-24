@@ -46,7 +46,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'Deckblatt Einkommensteuer'], 
+            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'Deckblatt Einkommensteuer', 'Deckblatt ESt'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
         },
@@ -62,7 +62,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'est': {
-            'prefixes': ['ESt Erklärung'], 
+            'prefixes': ['ESt Erklärung', 'Einkommensteuer'], 
             'exclude': ['Freizeichnungsdokument'],
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
