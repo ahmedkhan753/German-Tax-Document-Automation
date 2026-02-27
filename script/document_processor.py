@@ -29,9 +29,10 @@ CONFIG = {
     'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
     'output_dir': os.path.join(BASE_DIR, 'output'),
     'watermark_dir': os.path.join(BASE_DIR, 'watermarks'),
+    'delete_input_after_processing': True,
     'document_types': {
         'anschreiben': {
-            'prefixes': ['BaM', 'Übersendung'], 
+            'prefixes': ['BaM', 'Übersendung', '440372'], 
             'watermark': 'Wasserzeichen Anschreiben.pdf', 
             'format': 'docx'
         },
@@ -46,7 +47,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'Deckblatt Einkommensteuer', 'Deckblatt ESt'], 
+            'prefixes': ['Deckblatt', 'Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'Deckblatt Einkommensteuer', 'Deckblatt ESt', 'AP Deckblatt', 'JA AP'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
         },
@@ -62,13 +63,13 @@ CONFIG = {
             'format': 'pdf'
         },
         'est': {
-            'prefixes': ['ESt Erklärung', 'Einkommensteuer'], 
+            'prefixes': ['ESt Erklärung', 'Einkommensteuer', 'Est-Erklärung'], 
             'exclude': ['Freizeichnungsdokument'],
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
         'est_freizeichnung': {
-            'prefixes': ['ESt Erklärung Freizeichnungsdokument'], 
+            'prefixes': ['ESt Erklärung Freizeichnungsdokument', 'Est-Erklärung Freizeichnungsdokument'], 
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
@@ -92,8 +93,8 @@ CONFIG = {
     'merge_order': [
         'anschreiben',
         'jahresabschluss', 
-        'offenlegung', 
         'deckblatt_steuererklaerung', 
+        'offenlegung', 
         'kst', 
         'kst_freizeichnung', 
         'est',
@@ -137,8 +138,11 @@ def discover_files(input_dir):
             if file_path in matched_paths:
                 continue
             filename = os.path.basename(file_path).lower()
-            if any(p.lower() in filename for p in prefixes):
-                if not any(e.lower() in filename for e in excludes):
+            # Normalize filename by replacing hyphens and underscores with spaces for more robust matching
+            normalized_filename = filename.replace('-', ' ').replace('_', ' ')
+            
+            if any(p.lower() in normalized_filename for p in prefixes):
+                if not any(e.lower() in normalized_filename for e in excludes):
                     files_by_type[doc_type].append(file_path)
                     matched_paths.add(file_path)
                     logging.info(f"Matched {doc_type}: {os.path.basename(file_path)}")
@@ -153,6 +157,16 @@ def convert_to_pdf(file_path):
             temp_pdf_path = temp_pdf.name
         logging.info(f"Converting {os.path.basename(file_path)}...")
         convert(file_path, temp_pdf_path)
+        # Optionally remove original input file after successful conversion
+        try:
+            if CONFIG.get('delete_input_after_processing'):
+                try:
+                    os.remove(file_path)
+                    logging.info(f"Deleted original input: {file_path}")
+                except Exception as _e:
+                    logging.warning(f"Could not delete original input {file_path}: {_e}")
+        except Exception:
+            pass
         return temp_pdf_path
     except Exception as e:
         logging.error(f"Conversion failed: {e}")
@@ -169,15 +183,20 @@ def apply_watermark(pdf_path, doc_type):
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             wm_page = PyPDF2.PdfReader(wm_file).pages[0]
             writer = PyPDF2.PdfWriter()
+            
+            wm_w, wm_h = float(wm_page.mediabox.width), float(wm_page.mediabox.height)
+            logging.info(f"Watermark '{watermark_file}' dimensions: {wm_w}x{wm_h}")
 
             for i, page in enumerate(pdf_reader.pages):
                 w, h = float(page.mediabox.width), float(page.mediabox.height)
                 rotation = page.get('/Rotate', 0)
                 
-                wm_w, wm_h = float(wm_page.mediabox.width), float(wm_page.mediabox.height)
                 scale = min(w / wm_w, h / wm_h)
                 off_x = (w - (wm_w * scale)) / 2
                 off_y = (h - (wm_h * scale)) / 2
+                
+                if i == 0:
+                    logging.info(f"  Page {i+1} size: {w}x{h}, scale factor: {scale:.2f}, offset: ({off_x:.1f}, {off_y:.1f})")
                 
                 trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                 wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
@@ -191,10 +210,10 @@ def apply_watermark(pdf_path, doc_type):
                 
                 wm_overlay.add_transformation(trans)
                 
-                # FOREGROUND MERGE: Content first, then BRAND overlay on top for maximum visibility (Revision 7)
+                # BACKGROUND MERGE: Place watermark behind content so text remains readable
                 new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(page)
                 new_page.merge_page(wm_overlay)
+                new_page.merge_page(page)
                 writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
@@ -236,10 +255,10 @@ def apply_special_watermark(pdf_path):
 
                 wm_overlay.add_transformation(trans)
                 
-                # FOREGROUND MERGE
+                # BACKGROUND MERGE
                 new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(page)
                 new_page.merge_page(wm_overlay)
+                new_page.merge_page(page)
                 writer.add_page(new_page)
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
@@ -299,4 +318,18 @@ if __name__ == "__main__":
             
     final = merge_pdfs(processed_files)
     if final: print(f"\nFinal document created: {final}")
+    # If configured, delete original input files after processing
+    try:
+        if CONFIG.get('delete_input_after_processing'):
+            for dt, paths in found_files.items():
+                for p in paths:
+                    try:
+                        if os.path.exists(p):
+                            os.remove(p)
+                            logging.info(f"Deleted original input after processing: {p}")
+                    except Exception as _e:
+                        logging.warning(f"Could not delete {p}: {_e}")
+    except Exception:
+        pass
+
     safe_pause()
