@@ -14,9 +14,23 @@ import sys
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_base_path():
+    """Get the project root directory
+    
+    When running as Python script: Returns parent of script directory
+    When running as EXE: Returns parent of dist directory (project root)
+    """
     if getattr(sys, 'frozen', False):
-        return os.path.dirname(sys.executable)
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        # Running as EXE: sys.executable is dist/document_processor.exe
+        # Go up one level to get project root
+        exe_dir = os.path.dirname(sys.executable)  # dist/
+        project_root = os.path.dirname(exe_dir)     # project_root/
+        logging.debug(f"Running as EXE - Project root: {project_root}")
+        return project_root
+    # Running as Python script
+    script_dir = os.path.dirname(os.path.abspath(__file__))  # script/
+    project_root = os.path.dirname(script_dir)  # project_root/
+    logging.debug(f"Running as Python - Project root: {project_root}")
+    return project_root
 
 def safe_pause(message="\nPress Enter to continue..."):
     if sys.stdin and sys.stdin.isatty():
@@ -24,11 +38,37 @@ def safe_pause(message="\nPress Enter to continue..."):
         except EOFError: pass
 
 def ensure_directories():
-    """Create necessary directories if they don't exist"""
-    for directory in [CONFIG['output_dir'], CONFIG['processed_dir'], CONFIG['error_dir']]:
-        if not os.path.exists(directory):
-            os.makedirs(directory)
-            logging.info(f"Created directory: {directory}")
+    """Create necessary directories if they don't exist
+    
+    Raises exception if directories can't be created
+    """
+    try:
+        for dir_name, directory in [
+            ('output', CONFIG['output_dir']),
+            ('processed', CONFIG['processed_dir']),
+            ('error', CONFIG['error_dir'])
+        ]:
+            if not os.path.exists(directory):
+                try:
+                    os.makedirs(directory)
+                    logging.info(f"✓ Created directory: {dir_name} → {directory}")
+                except PermissionError:
+                    error_msg = f"Permission denied creating {dir_name} directory: {directory}"
+                    logging.error(error_msg)
+                    print(f"\n✗ ERROR: {error_msg}")
+                    raise
+                except Exception as e:
+                    error_msg = f"Failed to create {dir_name} directory: {e}"
+                    logging.error(error_msg)
+                    print(f"\n✗ ERROR: {error_msg}")
+                    raise
+            else:
+                logging.debug(f"Directory exists: {dir_name} → {directory}")
+    except Exception as e:
+        logging.error(f"Critical: Cannot create required directories: {e}")
+        print(f"\n✗ CRITICAL ERROR: Cannot create required directories")
+        print(f"   Please check folder permissions and disk space")
+        raise
 
 def move_file_to_processed(file_path):
     """Move successfully processed file to processed folder"""
@@ -357,62 +397,112 @@ def merge_pdfs(processed_files):
     return output_path
 
 if __name__ == "__main__":
-    # Create all necessary directories
-    ensure_directories()
-    
-    found_files = discover_files(CONFIG['input_dir'])
-    if not found_files:
-        logging.warning("No files found.")
-        sys.exit(0)
-    
-    processed_files = {}
-    for dt in CONFIG['merge_order']:
-        if dt not in found_files: continue
+    try:
+        # Verify BASE_DIR is set correctly
+        print(f"\n{'='*70}")
+        print(f"German Tax Automation - Document Processor v2.0")
+        print(f"{'='*70}")
+        print(f"Running from: {os.getcwd()}")
+        print(f"Project root: {BASE_DIR}")
+        print(f"{'='*70}\n")
         
-        try:
-            type_pdfs = []
-            for p in found_files[dt]:
-                pdf_path = convert_to_pdf(p)
-                if pdf_path: 
-                    type_pdfs.append(pdf_path)
-                else:
-                    logging.warning(f"Skipping {os.path.basename(p)} due to conversion error")
-            
-            if not type_pdfs: 
+        # Create all necessary directories
+        ensure_directories()
+        
+        # Discover files
+        logging.info("Starting document processing...")
+        found_files = discover_files(CONFIG['input_dir'])
+        if not found_files:
+            logging.warning("No files found in input directory.")
+            print(f"\n⚠ No documents found in: {CONFIG['input_dir']}")
+            print(f"   Please place tax documents in the Import Directory folder")
+            sys.exit(0)
+        
+        logging.info(f"Found documents for {len(found_files)} types")
+        for doc_type, files in found_files.items():
+            print(f"  ✓ {doc_type}: {len(files)} file(s)")
+        
+        processed_files = {}
+        for dt in CONFIG['merge_order']:
+            if dt not in found_files: 
                 continue
             
             try:
-                if len(type_pdfs) > 1:
-                    merger = PyPDF2.PdfMerger()
-                    for pdf in type_pdfs: merger.append(pdf)
-                    with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                        merger.write(tmp)
-                        section_pdf = tmp.name
-                else:
-                    section_pdf = type_pdfs[0]
+                type_pdfs = []
+                for p in found_files[dt]:
+                    pdf_path = convert_to_pdf(p)
+                    if pdf_path: 
+                        type_pdfs.append(pdf_path)
+                    else:
+                        logging.warning(f"Skipping {os.path.basename(p)} due to conversion error")
                 
-                watermarked = apply_watermark(section_pdf, dt)
-                if watermarked: 
-                    processed_files[dt] = watermarked
-                else:
-                    logging.error(f"Watermarking failed for {dt}")
+                if not type_pdfs: 
+                    continue
+                
+                try:
+                    if len(type_pdfs) > 1:
+                        merger = PyPDF2.PdfMerger()
+                        for pdf in type_pdfs: 
+                            merger.append(pdf)
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                            merger.write(tmp)
+                            section_pdf = tmp.name
+                    else:
+                        section_pdf = type_pdfs[0]
+                    
+                    watermarked = apply_watermark(section_pdf, dt)
+                    if watermarked: 
+                        processed_files[dt] = watermarked
+                    else:
+                        logging.error(f"Watermarking failed for {dt}")
+                except Exception as e:
+                    logging.error(f"Error processing document type {dt}: {e}")
+                    continue
             except Exception as e:
-                logging.error(f"Error processing document type {dt}: {e}")
+                logging.error(f"Unexpected error processing {dt}: {e}")
                 continue
+        
+        try:
+            final = merge_pdfs(processed_files)
+            if final: 
+                print(f"\n{'='*70}")
+                print(f"✓ SUCCESS - Final document created:")
+                print(f"   {final}")
+                print(f"{'='*70}\n")
+                logging.info(f"SUCCESS: Final output generated at {final}")
+            else:
+                print(f"\n{'='*70}")
+                print(f"✗ FAILURE - Could not create final document")
+                print(f"   Check error folder: {CONFIG['error_dir']}")
+                print(f"{'='*70}\n")
+                logging.error("FAILURE: Could not merge documents for final output")
         except Exception as e:
-            logging.error(f"Unexpected error processing {dt}: {e}")
-            continue
-    
-    try:
-        final = merge_pdfs(processed_files)
-        if final: 
-            print(f"\n✓ Final document created: {final}")
-            logging.info(f"SUCCESS: Final output generated at {final}")
-        else:
-            print("\n✗ Failed to create final document")
-            logging.error("FAILURE: Could not merge documents for final output")
-    except Exception as e:
-        logging.error(f"Error during final merge: {e}")
-        print(f"\n✗ Error creating final document: {e}")
+            logging.error(f"Error during final merge: {e}")
+            print(f"\n{'='*70}")
+            print(f"✗ Error creating final document: {e}")
+            print(f"   Check error folder: {CONFIG['error_dir']}")
+            print(f"{'='*70}\n")
 
-    safe_pause()
+        safe_pause()
+        
+    except KeyError as e:
+        logging.error(f"Configuration error - missing key: {e}")
+        print(f"\n✗ CONFIGURATION ERROR: {e}")
+        print(f"   The CONFIG dictionary may be corrupted")
+        safe_pause()
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"CRITICAL ERROR: {e}", exc_info=True)
+        print(f"\n{'='*70}")
+        print(f"✗ CRITICAL ERROR OCCURRED")
+        print(f"{'='*70}")
+        print(f"Error: {e}")
+        print(f"\nPlease check:")
+        print(f"  1. Folder permissions (input/output/watermarks)")
+        print(f"  2. Disk space availability")
+        print(f"  3. Watermark PDF files exist in 'watermarks' folder")
+        print(f"  4. Document files in 'input/Import Directory' are readable")
+        print(f"\nReview the console output above for more details")
+        print(f"{'='*70}\n")
+        safe_pause()
+        sys.exit(1)
