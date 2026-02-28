@@ -278,53 +278,85 @@ def apply_watermark(pdf_path, doc_type):
         return apply_special_watermark(pdf_path)
     
     watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
+    
+    # Validate watermark file exists
+    if not os.path.exists(watermark_path):
+        logging.error(f"✗ CRITICAL: Watermark file not found: {watermark_path}")
+        logging.error(f"   Expected location: {watermark_path}")
+        return None
+    
     try:
+        logging.info(f"Applying watermark '{watermark_file}' to {doc_type}...")
         with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
             pdf_reader = PyPDF2.PdfReader(pdf_file)
-            wm_page = PyPDF2.PdfReader(wm_file).pages[0]
+            wm_pdf = PyPDF2.PdfReader(wm_file)
+            
+            if len(wm_pdf.pages) == 0:
+                logging.error(f"✗ Watermark PDF is empty: {watermark_file}")
+                return None
+            
+            wm_page = wm_pdf.pages[0]
             writer = PyPDF2.PdfWriter()
             
             wm_w, wm_h = float(wm_page.mediabox.width), float(wm_page.mediabox.height)
-            logging.info(f"Watermark '{watermark_file}' dimensions: {wm_w}x{wm_h}")
+            logging.debug(f"  Watermark dimensions: {wm_w:.1f}x{wm_h:.1f}")
+            
+            page_count = len(pdf_reader.pages)
+            logging.debug(f"  Processing {page_count} pages...")
 
             for i, page in enumerate(pdf_reader.pages):
-                w, h = float(page.mediabox.width), float(page.mediabox.height)
-                rotation = page.get('/Rotate', 0)
-                
-                scale = min(w / wm_w, h / wm_h)
-                off_x = (w - (wm_w * scale)) / 2
-                off_y = (h - (wm_h * scale)) / 2
-                
-                if i == 0:
-                    logging.info(f"  Page {i+1} size: {w}x{h}, scale factor: {scale:.2f}, offset: ({off_x:.1f}, {off_y:.1f})")
-                
-                trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
-                wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                wm_overlay.merge_page(wm_page)
-                
-                # Handle rotation for the brand overlay
-                if rotation != 0:
-                    if rotation == 90: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(w, 0))
-                    elif rotation == 180: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(w, h))
-                    elif rotation == 270: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, h))
-                
-                wm_overlay.add_transformation(trans)
-                
-                # CRITICAL Z-LAYER ORDER: Place watermark BEHIND content so text remains readable
-                # The background must be created first, then watermark merged, then content merged on top
-                new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(wm_overlay)  # Watermark layer (background)
-                new_page.merge_page(page)        # Content layer (foreground)
-                writer.add_page(new_page)
-                logging.debug(f"  Page {i+1}: Watermark positioned as background layer ✓")
+                try:
+                    w, h = float(page.mediabox.width), float(page.mediabox.height)
+                    
+                    # Scale watermark to fit page while maintaining aspect ratio
+                    scale = min(w / wm_w, h / wm_h)
+                    
+                    # Center watermark on page (position at center, bottom area)
+                    wm_scaled_w = wm_w * scale
+                    wm_scaled_h = wm_h * scale
+                    off_x = (w - wm_scaled_w) / 2  # Center horizontally
+                    off_y = max(0, h - wm_scaled_h - 20)  # Position near bottom with margin
+                    
+                    if i == 0:
+                        logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
+                                    f"watermark at ({off_x:.1f}, {off_y:.1f})")
+                    
+                    # Apply transformation
+                    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+                    
+                    # Create watermark overlay
+                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    wm_copy = wm_page
+                    wm_overlay.merge_page(wm_copy)
+                    wm_overlay.add_transformation(trans)
+                    
+                    # Apply CRITICAL Z-ORDER: watermark as background, content as foreground
+                    new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    new_page.merge_page(wm_overlay)  # Watermark layer (background)
+                    new_page.merge_page(page)         # Content layer (foreground - readable)
+                    writer.add_page(new_page)
+                    
+                    logging.debug(f"  Page {i+1}: ✓ Watermark applied")
+                    
+                except Exception as page_error:
+                    logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
+                    # Fall back to original page without watermark for this page
+                    writer.add_page(page)
 
+            # Write watermarked PDF to temporary file
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Watermark applied successfully with proper z-order (background)")
-                return output.name
+                output_path = output.name
+            
+            logging.info(f"✓ Watermark applied successfully: {watermark_file}")
+            return output_path
+            
     except Exception as e:
-        logging.error(f"Watermarking failed: {e}")
-        return pdf_path
+        logging.error(f"✗ CRITICAL: Watermarking failed for {doc_type}: {e}")
+        logging.error(f"   Watermark file: {watermark_path}")
+        logging.error(f"   PDF file: {pdf_path}")
+        logging.error(f"   Error details: {str(e)}")
+        return None
 
 def apply_special_watermark(pdf_path):
     """Apply special watermarks with proper z-order (background layer)
@@ -334,50 +366,96 @@ def apply_special_watermark(pdf_path):
     """
     wm_deckblatt_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
     wm_allgemein_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
+    
+    # Validate both watermark files exist
+    if not os.path.exists(wm_deckblatt_path):
+        logging.error(f"✗ CRITICAL: Deckblatt watermark not found: {wm_deckblatt_path}")
+        return None
+    if not os.path.exists(wm_allgemein_path):
+        logging.error(f"✗ CRITICAL: Allgemein watermark not found: {wm_allgemein_path}")
+        return None
+    
     try:
+        logging.info(f"Applying special watermarks (Deckblatt + Allgemein)...")
         with open(pdf_path, 'rb') as pdf_file, \
              open(wm_deckblatt_path, 'rb') as wm_d_file, \
              open(wm_allgemein_path, 'rb') as wm_a_file:
             
             reader = PyPDF2.PdfReader(pdf_file)
             writer = PyPDF2.PdfWriter()
-            wm_d_page = PyPDF2.PdfReader(wm_d_file).pages[0]
-            wm_a_page = PyPDF2.PdfReader(wm_a_file).pages[0]
+            wm_d_pdf = PyPDF2.PdfReader(wm_d_file)
+            wm_a_pdf = PyPDF2.PdfReader(wm_a_file)
+            
+            if len(wm_d_pdf.pages) == 0 or len(wm_a_pdf.pages) == 0:
+                logging.error(f"✗ One or more watermark PDFs are empty")
+                return None
+            
+            wm_d_page = wm_d_pdf.pages[0]
+            wm_a_page = wm_a_pdf.pages[0]
+            
+            logging.debug(f"  Deckblatt watermark: {float(wm_d_page.mediabox.width):.1f}x{float(wm_d_page.mediabox.height):.1f}")
+            logging.debug(f"  Allgemein watermark: {float(wm_a_page.mediabox.width):.1f}x{float(wm_a_page.mediabox.height):.1f}")
+            
+            page_count = len(reader.pages)
+            logging.debug(f"  Processing {page_count} pages (Page 1 = Deckblatt, Pages 2+ = Allgemein)...")
 
             for i, page in enumerate(reader.pages):
-                w, h = float(page.mediabox.width), float(page.mediabox.height)
-                rotation = page.get('/Rotate', 0)
-                wm_to_use = wm_d_page if i == 0 else wm_a_page
-                
-                wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
-                scale = min(w / wm_w, h / wm_h)
-                off_x, off_y = (w - (wm_w * scale)) / 2, (h - (wm_h * scale)) / 2
-                trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
-                
-                wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                wm_overlay.merge_page(wm_to_use)
-                if rotation != 0:
-                    if rotation == 90: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(90).translate(w, 0))
-                    elif rotation == 180: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(180).translate(w, h))
-                    elif rotation == 270: wm_overlay.add_transformation(PyPDF2.Transformation().rotate(270).translate(0, h))
+                try:
+                    w, h = float(page.mediabox.width), float(page.mediabox.height)
+                    
+                    # Choose watermark: Deckblatt for page 1, Allgemein for rest
+                    wm_to_use = wm_d_page if i == 0 else wm_a_page
+                    wm_type = "Deckblatt" if i == 0 else "Allgemein"
+                    
+                    wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
+                    
+                    # Scale watermark to fit page
+                    scale = min(w / wm_w, h / wm_h)
+                    
+                    # Center watermark, position in bottom area
+                    wm_scaled_w = wm_w * scale
+                    wm_scaled_h = wm_h * scale
+                    off_x = (w - wm_scaled_w) / 2
+                    off_y = max(0, h - wm_scaled_h - 20)
+                    
+                    if i < 2:  # Log details for first two pages
+                        logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
+                                    f"scale {scale:.3f}, position ({off_x:.1f}, {off_y:.1f})")
+                    
+                    # Apply transformation
+                    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+                    
+                    # Create watermark overlay
+                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    wm_overlay.merge_page(wm_to_use)
+                    wm_overlay.add_transformation(trans)
+                    
+                    # Apply CRITICAL Z-ORDER: watermark as background, content as foreground
+                    new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    new_page.merge_page(wm_overlay)  # Watermark layer (background)
+                    new_page.merge_page(page)         # Content layer (foreground - readable)
+                    writer.add_page(new_page)
+                    
+                    logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
+                    
+                except Exception as page_error:
+                    logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
+                    # Fall back to original page without watermark
+                    writer.add_page(page)
 
-                wm_overlay.add_transformation(trans)
-                
-                # CRITICAL Z-LAYER ORDER: Place watermark BEHIND content so text remains readable
-                # The background must be created first, then watermark merged, then content merged on top
-                new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(wm_overlay)  # Watermark layer (background)
-                new_page.merge_page(page)        # Content layer (foreground)
-                writer.add_page(new_page)
-                logging.debug(f"  Page {i+1}: Special watermark positioned as background layer ✓")
-
+            # Write watermarked PDF to temporary file
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
-                logging.info(f"Special watermark applied successfully with proper z-order (background)")
-                return output.name
+                output_path = output.name
+            
+            logging.info(f"✓ Special watermarks applied successfully")
+            return output_path
+            
     except Exception as e:
-        logging.error(f"Special watermarking failed: {e}")
-        return pdf_path
+        logging.error(f"✗ CRITICAL: Special watermarking failed: {e}")
+        logging.error(f"   PDF file: {pdf_path}")
+        logging.error(f"   Error details: {str(e)}")
+        return None
 
 def merge_pdfs(processed_files):
     logging.info("Merging final document...")
@@ -398,6 +476,15 @@ def merge_pdfs(processed_files):
 
 if __name__ == "__main__":
     try:
+        # Configure UTF-8 encoding for Windows console
+        if hasattr(sys.stdout, 'reconfigure'):
+            try:
+                sys.stdout.reconfigure(encoding='utf-8')
+                sys.stderr.reconfigure(encoding='utf-8')
+            except Exception as _e:
+                # Fallback if reconfigure is not available
+                pass
+        
         # Verify BASE_DIR is set correctly
         print(f"\n{'='*70}")
         print(f"German Tax Automation - Document Processor v2.0")
