@@ -2,7 +2,55 @@
 
 ## Common Issues & Solutions
 
+### � EXE-Specific Issues
+
+#### Issue: EXE creates 'output' folder in dist/ directory
+**Problem**: Running .exe creates `dist/output/` instead of using project's `output/` folder
+**Solution**: ✅ **FIXED in latest build**
+- The EXE now correctly detects the project root (one level up from dist/)
+- All folders (input, output, watermarks) are now found correctly
+- To use the fix: Download the latest `dist/document_processor.exe`
+
+**If still having issues**:
+1. Delete the incorrectly created `dist/output/` folder
+2. Delete the old .exe file
+3. Rebuild the EXE: `pyinstaller --onefile --name document_processor --distpath dist --workpath build script/document_processor.py`
+
+#### Issue: EXE crashes with warning messages
+**Problem**: .exe file crashes or closes without clear error message
+**Solution**: ✅ **FIXED in latest build**
+- Added comprehensive error handling
+- Now displays clear error messages instead of crashing
+- Checks for:
+  - Missing folders (input/output/watermarks)
+  - Permission errors
+  - Disk space issues
+  - Invalid watermark files
+
+**Troubleshooting crashed EXE**:
+1. Run from command prompt (don't double-click) to see error messages:
+   ```bash
+   dist\document_processor.exe
+   ```
+2. Read the error message displayed on screen
+3. Common fixes:
+   - Verify `watermarks/` folder has PDF files
+   - Check `input/Import Directory/` folder exists
+   - Ensure output folder has write permissions
+   - Check disk space available
+
+#### Issue: "Project root" or file path warnings on startup
+**Problem**: Console shows path resolution messages
+**Solution**: Normal behavior - not an error
+- These are informational messages
+- Verify the "Project root:" path shown is correct:
+  - Should be: `D:\PROJECTS\.../German-tax-automation-prod`
+  - Should NOT be: `D:\PROJECTS\.../dist`
+
+---
+
 ### 📂 Folder & File Management
+
 
 #### Issue: "No files found" message
 **Problem**: The processor runs but finds no documents
