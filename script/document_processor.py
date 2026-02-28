@@ -23,12 +23,69 @@ def safe_pause(message="\nPress Enter to continue..."):
         try: input(message)
         except EOFError: pass
 
+def ensure_directories():
+    """Create necessary directories if they don't exist"""
+    for directory in [CONFIG['output_dir'], CONFIG['processed_dir'], CONFIG['error_dir']]:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+            logging.info(f"Created directory: {directory}")
+
+def move_file_to_processed(file_path):
+    """Move successfully processed file to processed folder"""
+    try:
+        if not os.path.exists(file_path):
+            logging.warning(f"File not found for moving to processed: {file_path}")
+            return None
+        
+        filename = os.path.basename(file_path)
+        destination = os.path.join(CONFIG['processed_dir'], filename)
+        
+        # Handle duplicate filenames
+        counter = 1
+        base, ext = os.path.splitext(filename)
+        while os.path.exists(destination):
+            destination = os.path.join(CONFIG['processed_dir'], f"{base}_{counter}{ext}")
+            counter += 1
+        
+        os.rename(file_path, destination)
+        logging.info(f"✓ Moved to processed: {filename}")
+        return destination
+    except Exception as e:
+        logging.error(f"Failed to move processed file {file_path}: {e}")
+        return None
+
+def move_file_to_error(file_path, error_message=""):
+    """Move file to error folder with logging"""
+    try:
+        if not os.path.exists(file_path):
+            logging.warning(f"File not found for moving to error: {file_path}")
+            return None
+        
+        filename = os.path.basename(file_path)
+        destination = os.path.join(CONFIG['error_dir'], filename)
+        
+        # Handle duplicate filenames
+        counter = 1
+        base, ext = os.path.splitext(filename)
+        while os.path.exists(destination):
+            destination = os.path.join(CONFIG['error_dir'], f"{base}_{counter}{ext}")
+            counter += 1
+        
+        os.rename(file_path, destination)
+        logging.error(f"✗ Moved to error folder: {filename} | Reason: {error_message}")
+        return destination
+    except Exception as e:
+        logging.error(f"Failed to move error file {file_path}: {e}")
+        return None
+
 BASE_DIR = get_base_path()
 
 CONFIG = {
-    'input_dir': os.path.join(BASE_DIR, 'input', 'Daten Franklin'),
+    'input_dir': os.path.join(BASE_DIR, 'input', 'Import Directory'),
     'output_dir': os.path.join(BASE_DIR, 'output'),
     'watermark_dir': os.path.join(BASE_DIR, 'watermarks'),
+    'processed_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'processed'),
+    'error_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'error'),
     'delete_input_after_processing': True,
     'document_types': {
         'anschreiben': {
@@ -161,15 +218,18 @@ def convert_to_pdf(file_path):
         try:
             if CONFIG.get('delete_input_after_processing'):
                 try:
-                    os.remove(file_path)
-                    logging.info(f"Deleted original input: {file_path}")
+                    # Move file to processed folder instead of permanent deletion
+                    move_file_to_processed(file_path)
+                    logging.info(f"Moved to processed after conversion: {file_path}")
                 except Exception as _e:
-                    logging.warning(f"Could not delete original input {file_path}: {_e}")
+                    logging.warning(f"Could not move original input {file_path}: {_e}")
         except Exception:
             pass
         return temp_pdf_path
     except Exception as e:
-        logging.error(f"Conversion failed: {e}")
+        logging.error(f"Conversion failed for {file_path}: {e}")
+        # Move failed file to error folder
+        move_file_to_error(file_path, f"Conversion error: {str(e)}")
         return None
 
 def apply_watermark(pdf_path, doc_type):
@@ -210,20 +270,28 @@ def apply_watermark(pdf_path, doc_type):
                 
                 wm_overlay.add_transformation(trans)
                 
-                # BACKGROUND MERGE: Place watermark behind content so text remains readable
+                # CRITICAL Z-LAYER ORDER: Place watermark BEHIND content so text remains readable
+                # The background must be created first, then watermark merged, then content merged on top
                 new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(wm_overlay)
-                new_page.merge_page(page)
+                new_page.merge_page(wm_overlay)  # Watermark layer (background)
+                new_page.merge_page(page)        # Content layer (foreground)
                 writer.add_page(new_page)
+                logging.debug(f"  Page {i+1}: Watermark positioned as background layer ✓")
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
+                logging.info(f"Watermark applied successfully with proper z-order (background)")
                 return output.name
     except Exception as e:
         logging.error(f"Watermarking failed: {e}")
         return pdf_path
 
 def apply_special_watermark(pdf_path):
+    """Apply special watermarks with proper z-order (background layer)
+    
+    - First page: Wasserzeichen Deckblatt.pdf (cover sheet watermark)
+    - Other pages: Wasserzeichen Allgemein.pdf (general watermark)
+    """
     wm_deckblatt_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
     wm_allgemein_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
     try:
@@ -255,14 +323,17 @@ def apply_special_watermark(pdf_path):
 
                 wm_overlay.add_transformation(trans)
                 
-                # BACKGROUND MERGE
+                # CRITICAL Z-LAYER ORDER: Place watermark BEHIND content so text remains readable
+                # The background must be created first, then watermark merged, then content merged on top
                 new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                new_page.merge_page(wm_overlay)
-                new_page.merge_page(page)
+                new_page.merge_page(wm_overlay)  # Watermark layer (background)
+                new_page.merge_page(page)        # Content layer (foreground)
                 writer.add_page(new_page)
+                logging.debug(f"  Page {i+1}: Special watermark positioned as background layer ✓")
 
             with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
                 writer.write(output)
+                logging.info(f"Special watermark applied successfully with proper z-order (background)")
                 return output.name
     except Exception as e:
         logging.error(f"Special watermarking failed: {e}")
@@ -286,7 +357,8 @@ def merge_pdfs(processed_files):
     return output_path
 
 if __name__ == "__main__":
-    if not os.path.exists(CONFIG['output_dir']): os.makedirs(CONFIG['output_dir'])
+    # Create all necessary directories
+    ensure_directories()
     
     found_files = discover_files(CONFIG['input_dir'])
     if not found_files:
@@ -296,40 +368,51 @@ if __name__ == "__main__":
     processed_files = {}
     for dt in CONFIG['merge_order']:
         if dt not in found_files: continue
-            
-        type_pdfs = []
-        for p in found_files[dt]:
-            pdf_path = convert_to_pdf(p)
-            if pdf_path: type_pdfs.append(pdf_path)
         
-        if not type_pdfs: continue
+        try:
+            type_pdfs = []
+            for p in found_files[dt]:
+                pdf_path = convert_to_pdf(p)
+                if pdf_path: 
+                    type_pdfs.append(pdf_path)
+                else:
+                    logging.warning(f"Skipping {os.path.basename(p)} due to conversion error")
             
-        if len(type_pdfs) > 1:
-            merger = PyPDF2.PdfMerger()
-            for pdf in type_pdfs: merger.append(pdf)
-            with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                merger.write(tmp)
-                section_pdf = tmp.name
-        else:
-            section_pdf = type_pdfs[0]
+            if not type_pdfs: 
+                continue
             
-        watermarked = apply_watermark(section_pdf, dt)
-        if watermarked: processed_files[dt] = watermarked
-            
-    final = merge_pdfs(processed_files)
-    if final: print(f"\nFinal document created: {final}")
-    # If configured, delete original input files after processing
+            try:
+                if len(type_pdfs) > 1:
+                    merger = PyPDF2.PdfMerger()
+                    for pdf in type_pdfs: merger.append(pdf)
+                    with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                        merger.write(tmp)
+                        section_pdf = tmp.name
+                else:
+                    section_pdf = type_pdfs[0]
+                
+                watermarked = apply_watermark(section_pdf, dt)
+                if watermarked: 
+                    processed_files[dt] = watermarked
+                else:
+                    logging.error(f"Watermarking failed for {dt}")
+            except Exception as e:
+                logging.error(f"Error processing document type {dt}: {e}")
+                continue
+        except Exception as e:
+            logging.error(f"Unexpected error processing {dt}: {e}")
+            continue
+    
     try:
-        if CONFIG.get('delete_input_after_processing'):
-            for dt, paths in found_files.items():
-                for p in paths:
-                    try:
-                        if os.path.exists(p):
-                            os.remove(p)
-                            logging.info(f"Deleted original input after processing: {p}")
-                    except Exception as _e:
-                        logging.warning(f"Could not delete {p}: {_e}")
-    except Exception:
-        pass
+        final = merge_pdfs(processed_files)
+        if final: 
+            print(f"\n✓ Final document created: {final}")
+            logging.info(f"SUCCESS: Final output generated at {final}")
+        else:
+            print("\n✗ Failed to create final document")
+            logging.error("FAILURE: Could not merge documents for final output")
+    except Exception as e:
+        logging.error(f"Error during final merge: {e}")
+        print(f"\n✗ Error creating final document: {e}")
 
     safe_pause()
