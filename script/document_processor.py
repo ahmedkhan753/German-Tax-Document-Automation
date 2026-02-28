@@ -321,20 +321,18 @@ def apply_watermark(pdf_path, doc_type):
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
                                     f"watermark at ({off_x:.1f}, {off_y:.1f})")
                     
-                    # Apply transformation
+                    # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay
+                    # FIX: Merge watermark DIRECTLY onto content page (not blank page)
+                    # This ensures watermark stays visible even if content has white background
                     wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    wm_copy = wm_page
-                    wm_overlay.merge_page(wm_copy)
+                    wm_overlay.merge_page(wm_page)
                     wm_overlay.add_transformation(trans)
                     
-                    # Apply CRITICAL Z-ORDER: watermark as background, content as foreground
-                    new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    new_page.merge_page(wm_overlay)  # Watermark layer (background)
-                    new_page.merge_page(page)         # Content layer (foreground - readable)
-                    writer.add_page(new_page)
+                    # Merge watermark BEFORE content so it stays under the text
+                    page.merge_page(wm_overlay)
+                    writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ Watermark applied")
                     
@@ -359,7 +357,7 @@ def apply_watermark(pdf_path, doc_type):
         return None
 
 def apply_special_watermark(pdf_path):
-    """Apply special watermarks with proper z-order (background layer)
+    """Apply special watermarks (directly onto content pages for visibility)
     
     - First page: Wasserzeichen Deckblatt.pdf (cover sheet watermark)
     - Other pages: Wasserzeichen Allgemein.pdf (general watermark)
@@ -422,19 +420,18 @@ def apply_special_watermark(pdf_path):
                         logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
                                     f"scale {scale:.3f}, position ({off_x:.1f}, {off_y:.1f})")
                     
-                    # Apply transformation
+                    # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay
+                    # FIX: Create watermark overlay and directly merge onto content page
+                    # This ensures watermark stays visible even if content has white background
                     wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
                     wm_overlay.merge_page(wm_to_use)
                     wm_overlay.add_transformation(trans)
                     
-                    # Apply CRITICAL Z-ORDER: watermark as background, content as foreground
-                    new_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    new_page.merge_page(wm_overlay)  # Watermark layer (background)
-                    new_page.merge_page(page)         # Content layer (foreground - readable)
-                    writer.add_page(new_page)
+                    # Merge watermark BEFORE content so it stays under the text
+                    page.merge_page(wm_overlay)
+                    writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
                     
