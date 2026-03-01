@@ -308,18 +308,47 @@ def apply_watermark(pdf_path, doc_type):
                 try:
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
+                    # Some documents (e.g. English cover letters) have a large title on the
+                    # first page.  If that text is present we try to avoid obscuring it by
+                    # moving the watermark down and reducing its size.  In the worst case we
+                    # just skip the watermark entirely for that page.
+                    orig_text = page.extract_text() or ""
+                    first_page_keywords = ["cover letter", "anschreiben", "deckblatt"]
+                    adjust_for_text = False
+                    if i == 0 and any(kw in orig_text.lower() for kw in first_page_keywords):
+                        adjust_for_text = True
+                        logging.warning(
+                            "First page contains one of %s; watermark will be skipped on page 1 to preserve text",
+                            first_page_keywords)
+                    # if we decided to adjust for text we simply skip page 1 entirely; the
+                    # rest of the loop will handle the remaining pages as normal.
+                    if adjust_for_text and i == 0:
+                        writer.add_page(page)
+                        continue
+
                     # Scale watermark to fit page while maintaining aspect ratio
                     scale = min(w / wm_w, h / wm_h)
+                    if adjust_for_text:
+                        # make the watermark a bit smaller so it doesn't span the entire
+                        # page, and move it nearer to the bottom edge.
+                        scale = min(scale, 0.7)
                     
-                    # Center watermark on page (position at center, bottom area)
+                    # Center watermark on page (position near top by default)
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2  # Center horizontally
-                    off_y = max(0, h - wm_scaled_h - 20)  # Position near bottom with margin
+
+                    if adjust_for_text:
+                        off_y = 20  # force bottom margin when we think text might be covered
+                    else:
+                        off_y = max(0, h - wm_scaled_h - 20)  # original behaviour
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
                                     f"watermark at ({off_x:.1f}, {off_y:.1f})")
+                        if scale > 0.9:
+                            logging.warning("Watermark scale is %.2f on first page; it may cover a large area. "
+                                            "Please inspect the output to ensure text remains readable.", scale)
                     
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
@@ -331,7 +360,17 @@ def apply_watermark(pdf_path, doc_type):
                     wm_overlay.add_transformation(trans)
                     
                     # Merge watermark BEFORE content so it stays under the text
-                    page.merge_page(wm_overlay)
+                    if adjust_for_text and i == 0:
+                        # if something still goes wrong we will detect it below
+                        try:
+                            page.merge_page(wm_overlay)
+                        except Exception:
+                            logging.error("Failed to merge adjusted watermark; skipping it on page 1")
+                            writer.add_page(page)
+                            continue
+                    else:
+                        page.merge_page(wm_overlay)
+
                     writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ Watermark applied")
@@ -407,18 +446,38 @@ def apply_special_watermark(pdf_path):
                     
                     wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
                     
+                    # Optionally adjust for first-page text issues (see apply_watermark above)
+                    orig_text = page.extract_text() or ""
+                    first_page_keywords = ["cover letter", "anschreiben", "deckblatt"]
+                    adjust_for_text = False
+                    if i == 0 and any(kw in orig_text.lower() for kw in first_page_keywords):
+                        adjust_for_text = True
+                        logging.warning("Special watermark: first page contains keywords %s; watermark will be skipped",
+                                        first_page_keywords)
+                    if adjust_for_text and i == 0:
+                        writer.add_page(page)
+                        continue
+
                     # Scale watermark to fit page
                     scale = min(w / wm_w, h / wm_h)
+                    if adjust_for_text:
+                        scale = min(scale, 0.7)
                     
-                    # Center watermark, position in bottom area
+                    # Center watermark, position in bottom area by default
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2
-                    off_y = max(0, h - wm_scaled_h - 20)
+                    if adjust_for_text:
+                        off_y = 20
+                    else:
+                        off_y = max(0, h - wm_scaled_h - 20)
                     
                     if i < 2:  # Log details for first two pages
                         logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
                                     f"scale {scale:.3f}, position ({off_x:.1f}, {off_y:.1f})")
+                        if i == 0 and scale > 0.9:
+                            logging.warning("Special watermark scale %.2f on first page is very large; "
+                                            "verify readability of underlying text.", scale)
                     
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
@@ -430,7 +489,15 @@ def apply_special_watermark(pdf_path):
                     wm_overlay.add_transformation(trans)
                     
                     # Merge watermark BEFORE content so it stays under the text
-                    page.merge_page(wm_overlay)
+                    if adjust_for_text and i == 0:
+                        try:
+                            page.merge_page(wm_overlay)
+                        except Exception:
+                            logging.error("Failed to merge adjusted special watermark; skipping for page 1")
+                            writer.add_page(page)
+                            continue
+                    else:
+                        page.merge_page(wm_overlay)
                     writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")

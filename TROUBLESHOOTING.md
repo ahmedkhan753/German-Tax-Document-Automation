@@ -115,6 +115,13 @@
 1. Check file name exists in `watermarks/` folder exactly as referenced:
    ```
    CONFIG must say: 'Wasserzeichen Deckblatt.pdf'
+
+- **Cover-page text hidden by watermark?**
+  The processor now looks for keywords like "Cover Letter", "Anschreiben" or
+  "Deckblatt" on the first page.  If any are found, the watermark will be *skipped*
+  on that page and a warning will be logged.  Check the output and logs if the
+  title still appears unclear; you may need to adjust the watermark PDF or the
+  document content.
    File must exist: watermarks/Wasserzeichen Deckblatt.pdf
    ```
 2. Check German special characters (ä, ö, ü, ß) are spelled correctly

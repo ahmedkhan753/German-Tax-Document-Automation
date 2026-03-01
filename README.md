@@ -42,6 +42,11 @@ A robust Python-based tax document processing system that converts, merges, and 
 ├── watermarks/
 │   ├── Wasserzeichen Deckblatt.pdf    # Cover sheet watermark
 │   ├── Wasserzeichen Allgemein.pdf    # General watermark
+
+> ⚠️ If the first page of a document contains a prominent title such as "Cover Letter",
+>     the watermarking step will now **skip the watermark on that page** to avoid
+>     obscuring the text.  A warning is logged when this occurs.  The rest of the
+>     document is processed as normal.
 │   └── ...                            # Other document-specific watermarks
 ├── dist/
 │   └── document_processor.exe     # Compiled executable (Windows)
