@@ -656,4 +656,4 @@ if __name__ == "__main__":
         print(f"\nReview the console output above for more details")
         print(f"{'='*70}\n")
         safe_pause()
-        
+        sys.exit(1)
