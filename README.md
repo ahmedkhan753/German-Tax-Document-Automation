@@ -172,5 +172,3 @@ Proprietary - German Tax Automation System
 - Smart file movement system
 - Enhanced error handling and logging
 
-### v1.0
-
