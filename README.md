@@ -160,10 +160,6 @@ Move to processed/ folder
 
 German Tax Automation Team
 
-## 📄 License
-
-Proprietary - German Tax Automation System
-
 ## 🔄 Version History
 
 ### v2.0 (Current)
