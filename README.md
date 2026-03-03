@@ -47,6 +47,8 @@ A robust Python-based tax document processing system that converts, merges, and 
 >     the watermarking step will now **skip the watermark on that page** to avoid
 >     obscuring the text.  A warning is logged when this occurs.  The rest of the
 >     document is processed as normal.
+
+_NOTE: build timestamp or other note added for push 2._
 │   └── ...                            # Other document-specific watermarks
 ├── dist/
 │   └── document_processor.exe     # Compiled executable (Windows)
