@@ -396,9 +396,9 @@ def apply_watermark(pdf_path, doc_type):
                     wm_overlay.merge_page(wm_page)
                     wm_overlay.add_transformation(trans)
                     
-                    # Merge watermark BEFORE content so it stays under the text
+                    # Merge watermark AFTER content so it stays visible even when
+                    # page content contains white boxes or heavy graphics.
                     if adjust_for_text and i == 0:
-                        # if something still goes wrong we will detect it below
                         try:
                             page.merge_page(wm_overlay)
                         except Exception:
@@ -410,7 +410,7 @@ def apply_watermark(pdf_path, doc_type):
 
                     writer.add_page(page)
                     
-                    logging.debug(f"  Page {i+1}: ✓ Watermark applied")
+                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
@@ -515,7 +515,7 @@ def apply_special_watermark(pdf_path, doc_type):
                     wm_overlay.merge_page(wm_to_use)
                     wm_overlay.add_transformation(trans)
                     
-                    # Merge watermark BEFORE content so it stays under the text
+                    # Merge watermark AFTER content for maximum visibility
                     page.merge_page(wm_overlay)
                     writer.add_page(page)
                     
