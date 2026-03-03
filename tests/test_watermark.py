@@ -22,6 +22,7 @@ def extract_first_page_text(pdf_path):
 
 def test_skip_watermark_on_cover_letter(tmp_path):
     # generate a pdf with "Cover Letter" text on first page
+    # push marker 4
     pdf = make_pdf("Cover Letter")
     # apply watermark for 'anschreiben' type (should skip first page)
     out = document_processor.apply_watermark(pdf, 'anschreiben')
