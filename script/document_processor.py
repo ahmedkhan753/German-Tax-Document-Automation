@@ -127,6 +127,11 @@ CONFIG = {
     'processed_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'processed'),
     'error_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'error'),
     'delete_input_after_processing': True,
+    # Document types that should skip first-page watermark (common for cover letters/deckblatt)
+    'skip_first_page_watermark_types': [
+        'deckblatt_steuererklaerung',
+        'anschreiben',
+    ],
     'document_types': {
         'anschreiben': {
             'prefixes': ['BaM', 'Übersendung', '440372'], 
@@ -217,6 +222,58 @@ DISCOVERY_ORDER = [
     'gewerbesteuer'
 ]
 
+def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
+    """Determine if first page should skip watermark based on multiple heuristics.
+    
+    Checks:
+    1. Document type in skip list (deckblatt_steuererklaerung, anschreiben)
+    2. Filename contains cover-like patterns (Deckblatt, Cover, Anschreiben)
+    3. Page text has cover-letter keywords (multiple languages)
+    4. Page is sparse (< 8 lines of text - typical for cover pages)
+    
+    Returns True if any indicator suggests this is a cover page.
+    """
+    # Check 1: document type in configured skip list
+    if doc_type in CONFIG.get('skip_first_page_watermark_types', []):
+        logging.debug(f"Document type '{doc_type}' is in skip list")
+        return True
+    
+    # Check 2: filename patterns
+    filename = os.path.basename(pdf_path).lower()
+    cover_patterns = [
+        'deckblatt', 'cover', 'anschreiben', 'übersendung',
+        'eröffnungsschreiben', 'begleitschreiben', 'coverletter'
+    ]
+    if any(p in filename for p in cover_patterns):
+        logging.debug(f"Filename '{filename}' matches cover-letter pattern")
+        return True
+    
+    # Check 3 & 4: page text analysis
+    try:
+        text = page_obj.extract_text() or ""
+        text_lower = text.lower()
+        
+        # Multi-language keywords for cover letters
+        keywords = [
+            'cover letter', 'dear sir', 'dear madam', 'very truly yours',
+            'anschreiben', 'deckblatt', 'betreff:', 'sehr geehrt',
+            'guten tag', 'mit freundlichen grüßen', 'hochachtungsvoll',
+            'eröffnungsschreiben', 'begleitschreiben', 'übersendung'
+        ]
+        if any(kw in text_lower for kw in keywords):
+            logging.debug(f"Page text contains cover-letter keyword")
+            return True
+        
+        # Sparse page heuristic (cover pages typically have minimal text)
+        lines = [l.strip() for l in text.split('\n') if l.strip()]
+        if 0 < len(lines) < 8:
+            logging.debug(f"Page is sparse ({len(lines)} lines); likely cover page")
+            return True
+    except Exception as e:
+        logging.debug(f"Could not analyze page for cover-letter detection: {e}")
+    
+    return False
+
 def discover_files(input_dir):
     logging.info(f"Searching for files in: {input_dir}")
     files_by_type = {t: [] for t in CONFIG['document_types']}
@@ -275,7 +332,7 @@ def convert_to_pdf(file_path):
 def apply_watermark(pdf_path, doc_type):
     watermark_file = CONFIG['document_types'][doc_type]['watermark']
     if watermark_file == 'special':
-        return apply_special_watermark(pdf_path)
+        return apply_special_watermark(pdf_path, doc_type)
     
     watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
     
@@ -308,47 +365,27 @@ def apply_watermark(pdf_path, doc_type):
                 try:
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
-                    # Some documents (e.g. English cover letters) have a large title on the
-                    # first page.  If that text is present we try to avoid obscuring it by
-                    # moving the watermark down and reducing its size.  In the worst case we
-                    # just skip the watermark entirely for that page.
-                    orig_text = page.extract_text() or ""
-                    first_page_keywords = ["cover letter", "anschreiben", "deckblatt"]
-                    adjust_for_text = False
-                    if i == 0 and any(kw in orig_text.lower() for kw in first_page_keywords):
-                        adjust_for_text = True
-                        logging.warning(
-                            "First page contains one of %s; watermark will be skipped on page 1 to preserve text",
-                            first_page_keywords)
-                    # if we decided to adjust for text we simply skip page 1 entirely; the
-                    # rest of the loop will handle the remaining pages as normal.
-                    if adjust_for_text and i == 0:
+                    # Use comprehensive heuristic to detect if this is a cover page
+                    # (checks filename, document type, text content, page sparsity)
+                    if i == 0 and should_skip_first_page_watermark(doc_type, pdf_path, page):
+                        logging.info(f"Page 1 detected as cover/title page; skipping watermark to preserve text")
                         writer.add_page(page)
                         continue
 
                     # Scale watermark to fit page while maintaining aspect ratio
                     scale = min(w / wm_w, h / wm_h)
-                    if adjust_for_text:
-                        # make the watermark a bit smaller so it doesn't span the entire
-                        # page, and move it nearer to the bottom edge.
-                        scale = min(scale, 0.7)
                     
-                    # Center watermark on page (position near top by default)
+                    # Center watermark on page (position near bottom)
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2  # Center horizontally
-
-                    if adjust_for_text:
-                        off_y = 20  # force bottom margin when we think text might be covered
-                    else:
-                        off_y = max(0, h - wm_scaled_h - 20)  # original behaviour
+                    off_y = max(0, h - wm_scaled_h - 20)  # Position near bottom with margin
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
                                     f"watermark at ({off_x:.1f}, {off_y:.1f})")
                         if scale > 0.9:
-                            logging.warning("Watermark scale is %.2f on first page; it may cover a large area. "
-                                            "Please inspect the output to ensure text remains readable.", scale)
+                            logging.warning("Watermark scale is %.2f on first page; inspect output for text readability.", scale)
                     
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
@@ -395,11 +432,12 @@ def apply_watermark(pdf_path, doc_type):
         logging.error(f"   Error details: {str(e)}")
         return None
 
-def apply_special_watermark(pdf_path):
+def apply_special_watermark(pdf_path, doc_type):
     """Apply special watermarks (directly onto content pages for visibility)
     
     - First page: Wasserzeichen Deckblatt.pdf (cover sheet watermark)
     - Other pages: Wasserzeichen Allgemein.pdf (general watermark)
+    Skips first page watermark if detected as cover page.
     """
     wm_deckblatt_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
     wm_allgemein_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
@@ -446,38 +484,27 @@ def apply_special_watermark(pdf_path):
                     
                     wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
                     
-                    # Optionally adjust for first-page text issues (see apply_watermark above)
-                    orig_text = page.extract_text() or ""
-                    first_page_keywords = ["cover letter", "anschreiben", "deckblatt"]
-                    adjust_for_text = False
-                    if i == 0 and any(kw in orig_text.lower() for kw in first_page_keywords):
-                        adjust_for_text = True
-                        logging.warning("Special watermark: first page contains keywords %s; watermark will be skipped",
-                                        first_page_keywords)
-                    if adjust_for_text and i == 0:
+                    # Use comprehensive heuristic to detect if first page is a cover page
+                    if i == 0 and should_skip_first_page_watermark(doc_type, pdf_path, page):
+                        logging.info(f"Special watermark: page 1 detected as cover/title page; skipping watermark")
                         writer.add_page(page)
                         continue
 
                     # Scale watermark to fit page
                     scale = min(w / wm_w, h / wm_h)
-                    if adjust_for_text:
-                        scale = min(scale, 0.7)
                     
-                    # Center watermark, position in bottom area by default
+                    # Center watermark, position in bottom area
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2
-                    if adjust_for_text:
-                        off_y = 20
-                    else:
-                        off_y = max(0, h - wm_scaled_h - 20)
+                    off_y = max(0, h - wm_scaled_h - 20)
                     
                     if i < 2:  # Log details for first two pages
                         logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
                                     f"scale {scale:.3f}, position ({off_x:.1f}, {off_y:.1f})")
                         if i == 0 and scale > 0.9:
-                            logging.warning("Special watermark scale %.2f on first page is very large; "
-                                            "verify readability of underlying text.", scale)
+                            logging.warning("Special watermark scale %.2f on first page is large; "
+                                            "inspect output for text readability.", scale)
                     
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
@@ -489,15 +516,7 @@ def apply_special_watermark(pdf_path):
                     wm_overlay.add_transformation(trans)
                     
                     # Merge watermark BEFORE content so it stays under the text
-                    if adjust_for_text and i == 0:
-                        try:
-                            page.merge_page(wm_overlay)
-                        except Exception:
-                            logging.error("Failed to merge adjusted special watermark; skipping for page 1")
-                            writer.add_page(page)
-                            continue
-                    else:
-                        page.merge_page(wm_overlay)
+                    page.merge_page(wm_overlay)
                     writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
