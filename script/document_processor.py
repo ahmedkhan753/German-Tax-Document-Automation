@@ -603,6 +603,13 @@ if __name__ == "__main__":
                     
                     watermarked = apply_watermark(section_pdf, dt)
                     if watermarked: 
+                        # sanity check: ensure watermark output has at least one page
+                        try:
+                            pages = len(PyPDF2.PdfReader(watermarked).pages)
+                            if pages == 0:
+                                logging.warning(f"Watermarked file for {dt} has no pages")
+                        except Exception:
+                            logging.warning(f"Could not read page count of watermarked file for {dt}")
                         processed_files[dt] = watermarked
                     else:
                         logging.error(f"Watermarking failed for {dt}")
@@ -612,6 +619,11 @@ if __name__ == "__main__":
             except Exception as e:
                 logging.error(f"Unexpected error processing {dt}: {e}")
                 continue
+        
+        # warn about any found types that weren't processed
+        for dt in found_files:
+            if dt not in processed_files:
+                logging.warning(f"Document type '{dt}' was discovered but not included in final output")
         
         try:
             final = merge_pdfs(processed_files)
