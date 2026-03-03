@@ -48,6 +48,17 @@ A robust Python-based tax document processing system that converts, merges, and 
 >     obscuring the text.  A warning is logged when this occurs.  The rest of the
 >     document is processed as normal.
 
+#### Cover Page Detection
+
+The system uses **four heuristics** to detect cover pages and skip first-page watermarking:
+
+1. **Document type** – Deckblatt and cover letters are configured to skip watermark on page 1
+2. **Filename patterns** – Files named with `Deckblatt`, `Cover`, `Anschreiben`, `Übersendung`, etc. trigger skip
+3. **Text keywords** – Pages containing salutations (`Dear Sir`, `Sehr geehrt`, `Guten Tag`), closings, or document types are detected
+4. **Page sparsity** – Pages with fewer than 8 lines of text (typical of cover letters) are flagged
+
+This ensures cover letters remain readable even if they use non-standard layouts or naming conventions.
+
 _NOTE: build timestamp or other note added for push 2._
 
 _Note for push 5: final dummy edit._
