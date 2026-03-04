@@ -1,3 +1,4 @@
+
 import os
 import glob
 import logging
@@ -338,7 +339,7 @@ def apply_watermark(pdf_path, doc_type):
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2  # Center horizontally
-                    off_y = max(0, h - wm_scaled_h - 20)  # Position near bottom with margin
+                    off_y = 20  # Position at bottom (footer)
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
@@ -349,18 +350,18 @@ def apply_watermark(pdf_path, doc_type):
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay on a blank page
-                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    wm_overlay.merge_page(wm_page)
-                    wm_overlay.add_transformation(trans)
+                    # Create watermark overlay on a blank page matching original dimensions/offsets
+                    # We merge the watermark into a correctly-sized blank page FIRST
+                    wm_container = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    wm_container.mediabox = page.mediabox
+                    wm_container.cropbox = page.cropbox
+                    wm_container.merge_page(wm_page)
+                    wm_container.add_transformation(trans)
                     
-                    # CRITICAL: Create another blank page and merge content FIRST, then watermark ON TOP
-                    # This ensures watermark is always visible (in front of content)
-                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    final_page.merge_page(page)  # Content goes first (behind)
-                    final_page.merge_page(wm_overlay)  # Watermark goes on top (in front)
-                    
-                    writer.add_page(final_page)
+                    # CRITICAL: Merging the original page ON TOP of the watermark container 
+                    # preserves the original page's coordinate system (and thus the footer).
+                    wm_container.merge_page(page)
+                    writer.add_page(wm_container)
                     
                     logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
@@ -449,7 +450,7 @@ def apply_special_watermark(pdf_path, doc_type):
                     wm_scaled_w = wm_w * scale
                     wm_scaled_h = wm_h * scale
                     off_x = (w - wm_scaled_w) / 2
-                    off_y = max(0, h - wm_scaled_h - 20)
+                    off_y = 20
                     
                     if i < 2:  # Log details for first two pages
                         logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
@@ -461,18 +462,16 @@ def apply_special_watermark(pdf_path, doc_type):
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay on a blank page
-                    wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    wm_overlay.merge_page(wm_to_use)
-                    wm_overlay.add_transformation(trans)
+                    # Create watermark overlay on a blank page matching original dimensions/offsets
+                    wm_container = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    wm_container.mediabox = page.mediabox
+                    wm_container.cropbox = page.cropbox
+                    wm_container.merge_page(wm_to_use)
+                    wm_container.add_transformation(trans)
                     
-                    # CRITICAL: Create another blank page and merge content FIRST, then watermark ON TOP
-                    # This ensures watermark is always visible (in front of content)
-                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    final_page.merge_page(page)  # Content goes first (behind)
-                    final_page.merge_page(wm_overlay)  # Watermark goes on top (in front)
-                    
-                    writer.add_page(final_page)
+                    # Merging original page ON TOP preserves footer and coordinates
+                    wm_container.merge_page(page)
+                    writer.add_page(wm_container)
                     
                     logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
                     
