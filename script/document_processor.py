@@ -128,11 +128,8 @@ CONFIG = {
     'error_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'error'),
     'delete_input_after_processing': True,
     # Document types that should skip first-page watermark (common for cover letters)
-    # Note: deckblatt_steuererklaerung and jahresabschluss are EXCLUDED here 
-    # because they are forced to have a watermark on page 1 in should_skip_first_page_watermark
-    'skip_first_page_watermark_types': [
-        'anschreiben',
-    ],
+    # Note: Empty because user wants watermarks on ALL pages now
+    'skip_first_page_watermark_types': [],
     'document_types': {
         'anschreiben': {
             'prefixes': ['BaM', 'Übersendung', '440372'], 
@@ -224,63 +221,12 @@ DISCOVERY_ORDER = [
 ]
 
 def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
-    """Determine if first page should skip watermark based on multiple heuristics.
+    """Determine if first page should skip watermark.
     
-    Checks:
-    1. Document type in skip list (deckblatt_steuererklaerung, anschreiben)
-    2. Filename contains cover-like patterns (Deckblatt, Cover, Anschreiben)
-    3. Page text has cover-letter keywords (multiple languages)
-    4. Page is sparse (< 8 lines of text - typical for cover pages)
-    
-    Returns True if any indicator suggests this is a cover page.
+    Update: User requested watermarks on ALL pages, including cover letters.
+    Always returns False to ensure full watermarking.
     """
-    # Check 0: Explicitly force watermarks for cover pages (requested by user)
-    # These types should always have watermarks even if sparse or cover-like
-    if doc_type in ['jahresabschluss', 'deckblatt_steuererklaerung']:
-        logging.debug(f"Forcing watermark for '{doc_type}' cover page as per user request")
-        return False
-
-    # Check 1: document type in configured skip list
-    if doc_type in CONFIG.get('skip_first_page_watermark_types', []):
-        logging.debug(f"Document type '{doc_type}' is in skip list")
-        return True
-    
-    # Check 2: filename patterns (but NOT for deckblatt - we WANT watermark on cover page)
-    filename = os.path.basename(pdf_path).lower()
-    cover_patterns = [
-        'cover', 'anschreiben', 'übersendung',
-        'eröffnungsschreiben', 'begleitschreiben', 'coverletter'
-    ]
-    if any(p in filename for p in cover_patterns):
-        matched_p = [p for p in cover_patterns if p in filename]
-        logging.info(f"Page 1: Skipping watermark - Filename '{filename}' matches cover-letter pattern: {matched_p}")
-        return True
-    
-    # Check 3 & 4: page text analysis
-    try:
-        text = page_obj.extract_text() or ""
-        text_lower = text.lower()
-        
-        # Multi-language keywords for cover letters (but NOT deckblatt - we WANT watermark on cover page)
-        keywords = [
-            'cover letter', 'dear sir', 'dear madam', 'very truly yours',
-            'anschreiben', 'betreff:', 'sehr geehrt',
-            'guten tag', 'mit freundlichen grüßen', 'hochachtungsvoll',
-            'eröffnungsschreiben', 'begleitschreiben', 'übersendung'
-        ]
-        if any(kw in text_lower for kw in keywords):
-            matched_kw = [kw for kw in keywords if kw in text_lower]
-            logging.info(f"Page 1: Skipping watermark - Page text contains cover-letter keywords: {matched_kw}")
-            return True
-        
-        # Sparse page heuristic (cover pages typically have minimal text)
-        lines = [l.strip() for l in text.split('\n') if l.strip()]
-        if 0 < len(lines) < 8:
-            logging.info(f"Page 1: Skipping watermark - Page is sparse ({len(lines)} lines); likely cover page")
-            return True
-    except Exception as e:
-        logging.debug(f"Could not analyze page for cover-letter detection: {e}")
-    
+    logging.debug(f"Watermark requested for all pages (doc_type: {doc_type})")
     return False
 
 def discover_files(input_dir):
