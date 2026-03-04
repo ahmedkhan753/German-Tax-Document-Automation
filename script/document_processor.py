@@ -128,7 +128,8 @@ CONFIG = {
     'error_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'error'),
     'delete_input_after_processing': True,
     # Document types that should skip first-page watermark (common for cover letters)
-    # Note: deckblatt_steuererklaerung is NOT here because we WANT watermark on the cover page
+    # Note: deckblatt_steuererklaerung and jahresabschluss are EXCLUDED here 
+    # because they are forced to have a watermark on page 1 in should_skip_first_page_watermark
     'skip_first_page_watermark_types': [
         'anschreiben',
     ],
