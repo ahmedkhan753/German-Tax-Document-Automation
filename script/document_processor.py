@@ -332,9 +332,13 @@ def apply_watermark(pdf_path, doc_type):
                     scale = min(w / wm_w, h / wm_h)
                     
                     # Center watermark horizontally relative to MediaBox
-                    # Position relative to MediaBox bottom exactly (no offset)
                     off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
-                    off_y = float(page.mediabox.bottom)
+                    
+                    # Apply specific logic by document type
+                    is_cover_doc = doc_type in ['anschreiben', 'deckblatt_steuererklaerung']
+                    
+                    # Cover pages get exact 0 offset, tax pages get +20 offset for perfect footer formatting
+                    off_y = float(page.mediabox.bottom) if is_cover_doc else float(page.mediabox.bottom) + 20
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
@@ -346,11 +350,20 @@ def apply_watermark(pdf_path, doc_type):
                     wm_page_to_merge = copy(wm_page)
                     wm_page_to_merge.add_transformation(trans)
                     
-                    # Merge watermark ON TOP of the original text
-                    page.merge_page(wm_page_to_merge)
-                    writer.add_page(page)
-                    
-                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
+                    if is_cover_doc:
+                        # COVER DOCUMENTS: Watermark BEHIND the text
+                        final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                        final_page.mediabox = page.mediabox
+                        final_page.cropbox = page.cropbox
+                        final_page.merge_page(wm_page_to_merge) # background
+                        final_page.merge_page(page)             # original text on top
+                        writer.add_page(final_page)
+                        logging.debug(f"  Page {i+1}: ✓ Watermark applied (behind text)")
+                    else:
+                        # TAX DOCUMENTS: Watermark ON TOP of the opaque text
+                        page.merge_page(wm_page_to_merge)
+                        writer.add_page(page)
+                        logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
@@ -428,7 +441,11 @@ def apply_special_watermark(pdf_path, doc_type):
                     
                     # Center watermark relative to MediaBox
                     off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
-                    off_y = float(page.mediabox.bottom)
+                    
+                    is_cover_page = (i == 0)
+                    
+                    # Cover gets 0 offset, remaining pages (Allgemein) get +20
+                    off_y = float(page.mediabox.bottom) if is_cover_page else float(page.mediabox.bottom) + 20
                     
                     logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, scale {scale:.3f}")
                     
@@ -438,16 +455,18 @@ def apply_special_watermark(pdf_path, doc_type):
                     wm_to_merge = copy(wm_to_use)
                     wm_to_merge.add_transformation(trans)
                     
-                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    final_page.mediabox = page.mediabox
-                    final_page.cropbox = page.cropbox
-                    
-                    # Merge watermark behind
-                    final_page.merge_page(wm_to_merge)
-                    # Merge text on top
-                    final_page.merge_page(page)
-                    
-                    writer.add_page(final_page)
+                    if is_cover_page:
+                        # PAGE 1 (Cover): Watermark behind
+                        final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                        final_page.mediabox = page.mediabox
+                        final_page.cropbox = page.cropbox
+                        final_page.merge_page(wm_to_merge)
+                        final_page.merge_page(page)
+                        writer.add_page(final_page)
+                    else:
+                        # PAGE 2+ (Tax Document): Watermark on top
+                        page.merge_page(wm_to_merge)
+                        writer.add_page(page)
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
