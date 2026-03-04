@@ -251,7 +251,8 @@ def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
         'eröffnungsschreiben', 'begleitschreiben', 'coverletter'
     ]
     if any(p in filename for p in cover_patterns):
-        logging.debug(f"Filename '{filename}' matches cover-letter pattern")
+        matched_p = [p for p in cover_patterns if p in filename]
+        logging.info(f"Page 1: Skipping watermark - Filename '{filename}' matches cover-letter pattern: {matched_p}")
         return True
     
     # Check 3 & 4: page text analysis
@@ -267,13 +268,14 @@ def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
             'eröffnungsschreiben', 'begleitschreiben', 'übersendung'
         ]
         if any(kw in text_lower for kw in keywords):
-            logging.debug(f"Page text contains cover-letter keyword")
+            matched_kw = [kw for kw in keywords if kw in text_lower]
+            logging.info(f"Page 1: Skipping watermark - Page text contains cover-letter keywords: {matched_kw}")
             return True
         
         # Sparse page heuristic (cover pages typically have minimal text)
         lines = [l.strip() for l in text.split('\n') if l.strip()]
         if 0 < len(lines) < 8:
-            logging.debug(f"Page is sparse ({len(lines)} lines); likely cover page")
+            logging.info(f"Page 1: Skipping watermark - Page is sparse ({len(lines)} lines); likely cover page")
             return True
     except Exception as e:
         logging.debug(f"Could not analyze page for cover-letter detection: {e}")
@@ -336,7 +338,11 @@ def convert_to_pdf(file_path):
         return None
 
 def apply_watermark(pdf_path, doc_type):
-    watermark_file = CONFIG['document_types'][doc_type]['watermark']
+    watermark_file = CONFIG['document_types'][doc_type].get('watermark')
+    if not watermark_file:
+        logging.info(f"No watermark configured for '{doc_type}'; skipping watermark application.")
+        return pdf_path
+
     if watermark_file == 'special':
         return apply_special_watermark(pdf_path, doc_type)
     
