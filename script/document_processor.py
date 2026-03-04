@@ -331,9 +331,6 @@ def apply_watermark(pdf_path, doc_type):
                     # Scale watermark to fit page while maintaining aspect ratio
                     scale = min(w / wm_w, h / wm_h)
                     
-                    # Scale watermark to fit page while maintaining aspect ratio
-                    scale = min(w / wm_w, h / wm_h)
-                    
                     # Center watermark horizontally relative to MediaBox
                     # Position relative to MediaBox bottom exactly (no offset)
                     off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
@@ -349,19 +346,11 @@ def apply_watermark(pdf_path, doc_type):
                     wm_page_to_merge = copy(wm_page)
                     wm_page_to_merge.add_transformation(trans)
                     
-                    # Create a blank foreground page with correct dimensions to hold everything
-                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    final_page.mediabox = page.mediabox
-                    final_page.cropbox = page.cropbox
+                    # Merge watermark ON TOP of the original text
+                    page.merge_page(wm_page_to_merge)
+                    writer.add_page(page)
                     
-                    # Merge watermark FIRST (so it sits in the background)
-                    final_page.merge_page(wm_page_to_merge)
-                    
-                    # Merge the original text ON TOP
-                    final_page.merge_page(page)
-                    writer.add_page(final_page)
-                    
-                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (behind text)")
+                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
