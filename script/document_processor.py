@@ -127,9 +127,9 @@ CONFIG = {
     'processed_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'processed'),
     'error_dir': os.path.join(BASE_DIR, 'input', 'Import Directory', 'error'),
     'delete_input_after_processing': True,
-    # Document types that should skip first-page watermark (common for cover letters/deckblatt)
+    # Document types that should skip first-page watermark (common for cover letters)
+    # Note: deckblatt_steuererklaerung is NOT here because we WANT watermark on the cover page
     'skip_first_page_watermark_types': [
-        'deckblatt_steuererklaerung',
         'anschreiben',
     ],
     'document_types': {
@@ -194,8 +194,8 @@ CONFIG = {
     },
     'merge_order': [
         'anschreiben',
-        'jahresabschluss', 
         'deckblatt_steuererklaerung', 
+        'jahresabschluss', 
         'offenlegung', 
         'kst', 
         'kst_freizeichnung', 
@@ -233,15 +233,21 @@ def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
     
     Returns True if any indicator suggests this is a cover page.
     """
+    # Check 0: Explicitly force watermarks for cover pages (requested by user)
+    # These types should always have watermarks even if sparse or cover-like
+    if doc_type in ['jahresabschluss', 'deckblatt_steuererklaerung']:
+        logging.debug(f"Forcing watermark for '{doc_type}' cover page as per user request")
+        return False
+
     # Check 1: document type in configured skip list
     if doc_type in CONFIG.get('skip_first_page_watermark_types', []):
         logging.debug(f"Document type '{doc_type}' is in skip list")
         return True
     
-    # Check 2: filename patterns
+    # Check 2: filename patterns (but NOT for deckblatt - we WANT watermark on cover page)
     filename = os.path.basename(pdf_path).lower()
     cover_patterns = [
-        'deckblatt', 'cover', 'anschreiben', 'übersendung',
+        'cover', 'anschreiben', 'übersendung',
         'eröffnungsschreiben', 'begleitschreiben', 'coverletter'
     ]
     if any(p in filename for p in cover_patterns):
@@ -253,10 +259,10 @@ def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
         text = page_obj.extract_text() or ""
         text_lower = text.lower()
         
-        # Multi-language keywords for cover letters
+        # Multi-language keywords for cover letters (but NOT deckblatt - we WANT watermark on cover page)
         keywords = [
             'cover letter', 'dear sir', 'dear madam', 'very truly yours',
-            'anschreiben', 'deckblatt', 'betreff:', 'sehr geehrt',
+            'anschreiben', 'betreff:', 'sehr geehrt',
             'guten tag', 'mit freundlichen grüßen', 'hochachtungsvoll',
             'eröffnungsschreiben', 'begleitschreiben', 'übersendung'
         ]
@@ -390,25 +396,18 @@ def apply_watermark(pdf_path, doc_type):
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # FIX: Merge watermark DIRECTLY onto content page (not blank page)
-                    # This ensures watermark stays visible even if content has white background
+                    # Create watermark overlay on a blank page
                     wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
                     wm_overlay.merge_page(wm_page)
                     wm_overlay.add_transformation(trans)
                     
-                    # Merge watermark AFTER content so it stays visible even when
-                    # page content contains white boxes or heavy graphics.
-                    if adjust_for_text and i == 0:
-                        try:
-                            page.merge_page(wm_overlay)
-                        except Exception:
-                            logging.error("Failed to merge adjusted watermark; skipping it on page 1")
-                            writer.add_page(page)
-                            continue
-                    else:
-                        page.merge_page(wm_overlay)
-
-                    writer.add_page(page)
+                    # CRITICAL: Create another blank page and merge content FIRST, then watermark ON TOP
+                    # This ensures watermark is always visible (in front of content)
+                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    final_page.merge_page(page)  # Content goes first (behind)
+                    final_page.merge_page(wm_overlay)  # Watermark goes on top (in front)
+                    
+                    writer.add_page(final_page)
                     
                     logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
@@ -509,15 +508,18 @@ def apply_special_watermark(pdf_path, doc_type):
                     # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # FIX: Create watermark overlay and directly merge onto content page
-                    # This ensures watermark stays visible even if content has white background
+                    # Create watermark overlay on a blank page
                     wm_overlay = PyPDF2.PageObject.create_blank_page(width=w, height=h)
                     wm_overlay.merge_page(wm_to_use)
                     wm_overlay.add_transformation(trans)
                     
-                    # Merge watermark AFTER content for maximum visibility
-                    page.merge_page(wm_overlay)
-                    writer.add_page(page)
+                    # CRITICAL: Create another blank page and merge content FIRST, then watermark ON TOP
+                    # This ensures watermark is always visible (in front of content)
+                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+                    final_page.merge_page(page)  # Content goes first (behind)
+                    final_page.merge_page(wm_overlay)  # Watermark goes on top (in front)
+                    
+                    writer.add_page(final_page)
                     
                     logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
                     
