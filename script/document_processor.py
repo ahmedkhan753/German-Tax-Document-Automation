@@ -1,7 +1,7 @@
-
 import os
 import glob
 import logging
+from copy import copy
 from docx2pdf import convert
 import PyPDF2
 from tempfile import NamedTemporaryFile
@@ -325,43 +325,34 @@ def apply_watermark(pdf_path, doc_type):
                 try:
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
-                    # Use comprehensive heuristic to detect if this is a cover page
-                    # (checks filename, document type, text content, page sparsity)
-                    if i == 0 and should_skip_first_page_watermark(doc_type, pdf_path, page):
-                        logging.info(f"Page 1 detected as cover/title page; skipping watermark to preserve text")
-                        writer.add_page(page)
-                        continue
+                    # Apply to ALL pages as requested by user
+                    # If special skipping is needed for truly blank pages, it can be added here
 
                     # Scale watermark to fit page while maintaining aspect ratio
                     scale = min(w / wm_w, h / wm_h)
                     
-                    # Center watermark on page (position near bottom)
-                    wm_scaled_w = wm_w * scale
-                    wm_scaled_h = wm_h * scale
-                    off_x = (w - wm_scaled_w) / 2  # Center horizontally
-                    off_y = 20  # Position at bottom (footer)
+                    # Scale watermark to fit page while maintaining aspect ratio
+                    scale = min(w / wm_w, h / wm_h)
+                    
+                    # Center watermark horizontally relative to MediaBox
+                    # Position relative to MediaBox bottom
+                    off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
+                    off_y = float(page.mediabox.bottom) + 20 
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
-                                    f"watermark at ({off_x:.1f}, {off_y:.1f})")
-                        if scale > 0.9:
-                            logging.warning("Watermark scale is %.2f on first page; inspect output for text readability.", scale)
+                                     f"pos ({off_x:.1f}, {off_y:.1f})")
                     
-                    # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay on a blank page matching original dimensions/offsets
-                    # We merge the watermark into a correctly-sized blank page FIRST
-                    wm_container = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    wm_container.mediabox = page.mediabox
-                    wm_container.cropbox = page.cropbox
-                    wm_container.merge_page(wm_page)
-                    wm_container.add_transformation(trans)
+                    # Create a copy of the watermark page to avoid accumulation
+                    # PyPDF2 3.0+ requires transforming the page object BEFORE merging
+                    wm_page_to_merge = copy(wm_page)
+                    wm_page_to_merge.add_transformation(trans)
                     
-                    # CRITICAL: Merging the original page ON TOP of the watermark container 
-                    # preserves the original page's coordinate system (and thus the footer).
-                    wm_container.merge_page(page)
-                    writer.add_page(wm_container)
+                    # Merge watermark directly onto page (on top)
+                    page.merge_page(wm_page_to_merge)
+                    writer.add_page(page)
                     
                     logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
@@ -389,18 +380,17 @@ def apply_special_watermark(pdf_path, doc_type):
     """Apply special watermarks (directly onto content pages for visibility)
     
     - First page: Wasserzeichen Deckblatt.pdf (cover sheet watermark)
-    - Other pages: Wasserzeichen Allgemein.pdf (general watermark)
-    Skips first page watermark if detected as cover page.
+    - Subsequent pages: Wasserzeichen Allgemein.pdf (as requested)
     """
     wm_deckblatt_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Deckblatt.pdf')
     wm_allgemein_path = os.path.join(CONFIG['watermark_dir'], 'Wasserzeichen Allgemein.pdf')
     
-    # Validate both watermark files exist
+    # Validate watermark files exist
     if not os.path.exists(wm_deckblatt_path):
-        logging.error(f"✗ CRITICAL: Deckblatt watermark not found: {wm_deckblatt_path}")
+        logging.error(f"✗ Deckblatt watermark not found: {wm_deckblatt_path}")
         return None
     if not os.path.exists(wm_allgemein_path):
-        logging.error(f"✗ CRITICAL: Allgemein watermark not found: {wm_allgemein_path}")
+        logging.error(f"✗ Allgemein watermark not found: {wm_allgemein_path}")
         return None
     
     try:
@@ -425,59 +415,39 @@ def apply_special_watermark(pdf_path, doc_type):
             logging.debug(f"  Allgemein watermark: {float(wm_a_page.mediabox.width):.1f}x{float(wm_a_page.mediabox.height):.1f}")
             
             page_count = len(reader.pages)
-            logging.debug(f"  Processing {page_count} pages (Page 1 = Deckblatt, Pages 2+ = Allgemein)...")
+            logging.debug(f"  Processing {page_count} pages (P1=Deckblatt, P2+=Allgemein)...")
 
             for i, page in enumerate(reader.pages):
                 try:
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
-                    # Choose watermark: Deckblatt for page 1, Allgemein for rest
+                    # Choose watermark
                     wm_to_use = wm_d_page if i == 0 else wm_a_page
                     wm_type = "Deckblatt" if i == 0 else "Allgemein"
                     
                     wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
                     
-                    # Use comprehensive heuristic to detect if first page is a cover page
-                    if i == 0 and should_skip_first_page_watermark(doc_type, pdf_path, page):
-                        logging.info(f"Special watermark: page 1 detected as cover/title page; skipping watermark")
-                        writer.add_page(page)
-                        continue
-
                     # Scale watermark to fit page
                     scale = min(w / wm_w, h / wm_h)
                     
-                    # Center watermark, position in bottom area
-                    wm_scaled_w = wm_w * scale
-                    wm_scaled_h = wm_h * scale
-                    off_x = (w - wm_scaled_w) / 2
-                    off_y = 20
+                    # Center watermark relative to MediaBox
+                    off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
+                    off_y = float(page.mediabox.bottom) + 20
                     
-                    if i < 2:  # Log details for first two pages
-                        logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, "
-                                    f"scale {scale:.3f}, position ({off_x:.1f}, {off_y:.1f})")
-                        if i == 0 and scale > 0.9:
-                            logging.warning("Special watermark scale %.2f on first page is large; "
-                                            "inspect output for text readability.", scale)
+                    logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, scale {scale:.3f}")
                     
-                    # Apply transformation to watermark
                     trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
-                    # Create watermark overlay on a blank page matching original dimensions/offsets
-                    wm_container = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    wm_container.mediabox = page.mediabox
-                    wm_container.cropbox = page.cropbox
-                    wm_container.merge_page(wm_to_use)
-                    wm_container.add_transformation(trans)
+                    # Use a copy to avoid accumulation
+                    wm_to_merge = copy(wm_to_use)
+                    wm_to_merge.add_transformation(trans)
                     
-                    # Merging original page ON TOP preserves footer and coordinates
-                    wm_container.merge_page(page)
-                    writer.add_page(wm_container)
-                    
-                    logging.debug(f"  Page {i+1}: ✓ {wm_type} watermark applied")
+                    # Use direct merge
+                    page.merge_page(wm_to_merge)
+                    writer.add_page(page)
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
-                    # Fall back to original page without watermark
                     writer.add_page(page)
 
             # Write watermarked PDF to temporary file
@@ -509,6 +479,7 @@ def merge_pdfs(processed_files):
     with open(output_path, 'wb') as f:
         merger.write(f)
     merger.close()
+    
     return output_path
 
 if __name__ == "__main__":
@@ -607,10 +578,6 @@ if __name__ == "__main__":
                 print(f"{'='*70}\n")
                 logging.info(f"SUCCESS: Final output generated at {final}")
             else:
-                print(f"\n{'='*70}")
-                print(f"✗ FAILURE - Could not create final document")
-                print(f"   Check error folder: {CONFIG['error_dir']}")
-                print(f"{'='*70}\n")
                 logging.error("FAILURE: Could not merge documents for final output")
         except Exception as e:
             logging.error(f"Error during final merge: {e}")
@@ -618,8 +585,6 @@ if __name__ == "__main__":
             print(f"✗ Error creating final document: {e}")
             print(f"   Check error folder: {CONFIG['error_dir']}")
             print(f"{'='*70}\n")
-
-        safe_pause()
         
     except KeyError as e:
         logging.error(f"Configuration error - missing key: {e}")
