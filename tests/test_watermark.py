@@ -34,5 +34,42 @@ def test_skip_watermark_on_cover_letter(tmp_path):
     assert "Cover Letter" in extract_first_page_text(pdf)
 
 
+def test_no_skip_watermark_on_jahresabschluss(tmp_path):
+    # generate a pdf with minimal text (sparse)
+    pdf = make_pdf("JA Jahresabschluss 2024")
+    
+    # Mocking properties for should_skip_first_page_watermark
+    # We want to verify that jahresabschluss returns False (don't skip)
+    # even if it's sparse.
+    
+    # We can't easily mock page_obj.extract_text() without a real PDF reader
+    # but the logic in should_skip_first_page_watermark will see 'jahresabschluss' 
+    # doc_type and return False immediately now.
+    
+    from script.document_processor import should_skip_first_page_watermark
+    import PyPDF2
+    
+    with open(pdf, 'rb') as f:
+        reader = PyPDF2.PdfReader(f)
+        page = reader.pages[0]
+        # This should now return False because of the explicit doc_type check
+        skip = should_skip_first_page_watermark('jahresabschluss', pdf, page)
+        assert skip is False, "Jahresabschluss should NOT skip watermark even if sparse"
+
+    # Also check deckblatt
+    with open(pdf, 'rb') as f:
+        reader = PyPDF2.PdfReader(f)
+        page = reader.pages[0]
+        skip = should_skip_first_page_watermark('deckblatt_steuererklaerung', pdf, page)
+        assert skip is False, "Deckblatt should NOT skip watermark even if sparse"
+
+    # Check that anschreiben STILL skips
+    with open(pdf, 'rb') as f:
+        reader = PyPDF2.PdfReader(f)
+        page = reader.pages[0]
+        skip = should_skip_first_page_watermark('anschreiben', pdf, page)
+        assert skip is True, "Anschreiben SHOULD skip watermark if sparse/matches patterns"
+
+
 if __name__ == '__main__':
     pytest.main([os.path.basename(__file__)])
