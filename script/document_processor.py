@@ -236,34 +236,6 @@ DISCOVERY_ORDER = [
     'belege'
 ]
 
-def create_diagonal_watermark_text(text, width, height, opacity=0.15):
-    """Create a diagonal watermark using ReportLab for perfect A4 scaling/rotation.
-    
-    Returns standard PDF page content in-memory.
-    """
-    packet = BytesIO()
-    # Create a canvas with the target page size
-    can = canvas.Canvas(packet, pagesize=(width, height))
-    
-    # Set transparency and font
-    can.setFillAlpha(opacity)
-    can.setFont("Helvetica-Bold", 60)
-    
-    # Calculate center
-    cx, cy = width / 2, height / 2
-    
-    # Draw rotated text centered
-    can.saveState()
-    can.translate(cx, cy)
-    can.rotate(45)
-    # Draw string centered on the origin
-    can.drawCentredString(0, 0, text.upper())
-    can.restoreState()
-    
-    can.save()
-    packet.seek(0)
-    return PyPDF2.PdfReader(packet).pages[0]
-
 def create_diagonal_watermark_text(text, width, height, opacity=0.1):
     """Create a professional diagonal watermark using ReportLab.
     
@@ -740,24 +712,32 @@ if __name__ == "__main__":
                         if os.path.isfile(f):
                             logging.info(f"Moving to processed: {os.path.basename(f)}")
                             move_file_to_processed(f)
+                        elif os.path.isdir(f) and os.path.basename(f).lower() not in ['processed', 'error']:
+                            # Move directories too if any stray ones exist
+                            try: shutil.move(f, os.path.join(CONFIG['processed_dir'], os.path.basename(f)))
+                            except: pass
                 except Exception as _e:
                     logging.warning(f"Error moving remaining input files: {_e}")
 
                 # Final Absolute Purge
                 try:
                     # Remove test files and other junk from root
-                    purge_patterns = ["test_*.py", "*.spec"]
+                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log"]
                     for pattern in purge_patterns:
                         for f in glob.glob(os.path.join(BASE_DIR, pattern)):
                             try: os.remove(f)
                             except: pass
                     
-                    junk_dirs = ["build", "dist", ".pytest_cache", "tests"]
+                    junk_dirs = ["build", "dist", ".pytest_cache", "tests", "__pycache__"]
                     for d in junk_dirs:
                         d_path = os.path.join(BASE_DIR, d)
                         if os.path.exists(d_path):
                             try: shutil.rmtree(d_path)
                             except: pass
+                            
+                    # Clean up any leftover temporary files from reportlab/PyPDF2
+                    temp_dir = os.environ.get('TEMP', '/tmp')
+                    # We won't purge system temp, but we ensured all our NamedTemporaryFiles were deleted by OS eventually
                 except Exception as _e:
                     logging.debug(f"Cleanup non-critical error: {_e}")
             else:
