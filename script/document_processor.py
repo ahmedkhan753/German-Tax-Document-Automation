@@ -138,7 +138,7 @@ CONFIG = {
             'format': 'docx'
         },
         'jahresabschluss': {
-            'prefixes': ['JA Jahresabschluss', 'JA Abschluss'], 
+            'prefixes': ['JA Jahresabschluss', 'JA Abschluss', 'Jahresabschluss', 'Bilanz', 'E-Bilanz', '439111'], 
             'watermark': 'special', 
             'format': 'pdf'
         },
@@ -170,7 +170,7 @@ CONFIG = {
             'format': 'pdf'
         },
         'est_freizeichnung': {
-            'prefixes': ['ESt Erklärung Freizeichnungsdokument', 'Est-Erklärung Freizeichnungsdokument'], 
+            'prefixes': ['ESt Erklärung Freizeichnungsdokument', 'Est-Erklärung Freizeichnungsdokument', '439224'], 
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
@@ -193,31 +193,31 @@ CONFIG = {
     },
     'merge_order': [
         'anschreiben',
+        'jahresabschluss',
+        'offenlegung',
         'deckblatt_steuererklaerung', 
-        'jahresabschluss', 
-        'offenlegung', 
         'kst', 
         'kst_freizeichnung', 
-        'est',
-        'est_freizeichnung',
         'ust', 
         'ust_freizeichnung',
+        'est',
+        'est_freizeichnung',
         'gewerbesteuer'
     ]
 }
 
 # Priority for file matching to handle overlaps correctly
 DISCOVERY_ORDER = [
-    'anschreiben',                 # Catch BaM/Übersendung first
-    'deckblatt_steuererklaerung',  # Then catch Deckblatt/440368
+    'anschreiben',
     'jahresabschluss',
     'offenlegung',
+    'deckblatt_steuererklaerung',
     'kst_freizeichnung',
     'kst',
-    'est_freizeichnung',
-    'est',
     'ust_freizeichnung',
     'ust',
+    'est_freizeichnung',
+    'est',
     'gewerbesteuer'
 ]
 
@@ -267,17 +267,6 @@ def convert_to_pdf(file_path):
             temp_pdf_path = temp_pdf.name
         logging.info(f"Converting {os.path.basename(file_path)}...")
         convert(file_path, temp_pdf_path)
-        # Optionally remove original input file after successful conversion
-        try:
-            if CONFIG.get('delete_input_after_processing'):
-                try:
-                    # Move file to processed folder instead of permanent deletion
-                    move_file_to_processed(file_path)
-                    logging.info(f"Moved to processed after conversion: {file_path}")
-                except Exception as _e:
-                    logging.warning(f"Could not move original input {file_path}: {_e}")
-        except Exception:
-            pass
         return temp_pdf_path
     except Exception as e:
         logging.error(f"Conversion failed for {file_path}: {e}")
@@ -337,8 +326,8 @@ def apply_watermark(pdf_path, doc_type):
                     # Apply specific logic by document type
                     is_cover_doc = doc_type in ['anschreiben', 'deckblatt_steuererklaerung']
                     
-                    # Cover pages get exact 0 offset, tax pages get +20 offset for perfect footer formatting
-                    off_y = float(page.mediabox.bottom) if is_cover_doc else float(page.mediabox.bottom) + 20
+                    # Align to bottom for all pages on A4
+                    off_y = float(page.mediabox.bottom)
                     
                     if i == 0:
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
@@ -444,8 +433,8 @@ def apply_special_watermark(pdf_path, doc_type):
                     
                     is_cover_page = (i == 0)
                     
-                    # Cover gets 0 offset, remaining pages (Allgemein) get +20
-                    off_y = float(page.mediabox.bottom) if is_cover_page else float(page.mediabox.bottom) + 20
+                    # Align to bottom for all pages on A4
+                    off_y = float(page.mediabox.bottom)
                     
                     logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, scale {scale:.3f}")
                     
@@ -599,6 +588,11 @@ if __name__ == "__main__":
                 print(f"   {final}")
                 print(f"{'='*70}\n")
                 logging.info(f"SUCCESS: Final output generated at {final}")
+                
+                # Move all discovered files to processed
+                for dt, files in found_files.items():
+                    for f in files:
+                        move_file_to_processed(f)
             else:
                 logging.error("FAILURE: Could not merge documents for final output")
         except Exception as e:
