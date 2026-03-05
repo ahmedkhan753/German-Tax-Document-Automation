@@ -353,6 +353,7 @@ def apply_watermark(pdf_path, doc_type):
                     # Diagonal Rotation (45 degrees) for "Allgemein" to ensure A4 suitability
                     # Using transformation centered on the watermark page
                     if watermark_file == 'Wasserzeichen Allgemein.pdf':
+                        # Center rotate then translate - ensure it spans A4 diagonally
                         trans = PyPDF2.Transformation().rotate(45, wm_w/2, wm_h/2).scale(scale).translate(off_x, off_y)
                     else:
                         trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
@@ -563,24 +564,31 @@ if __name__ == "__main__":
                 
                 try:
                     reader = PyPDF2.PdfReader(pdf_p)
-                    if len(reader.pages) > 2:
+                    # Splitting every form that has more than 1 page to ensure first 2 pages are calculations
+                    if len(reader.pages) > 1:
                         logging.info(f"Splitting {os.path.basename(p)}: P1-2 -> Calculations, P3+ -> Form")
                         
-                        # Part 1: Calculations (P1-2)
+                        # Part 1: Calculations (P1-2, or just P1 if only 1 page was found)
                         p12_writer = PyPDF2.PdfWriter()
                         p12_writer.add_page(reader.pages[0])
-                        p12_writer.add_page(reader.pages[1])
+                        if len(reader.pages) > 1:
+                            p12_writer.add_page(reader.pages[1])
+                            
                         with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
                             p12_writer.write(t)
                             calc_parts.append(t.name)
                         
                         # Part 2: Form (P3+)
-                        form_writer = PyPDF2.PdfWriter()
-                        for i in range(2, len(reader.pages)):
-                            form_writer.add_page(reader.pages[i])
-                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
-                            form_writer.write(t)
-                            new_paths.append(t.name)
+                        if len(reader.pages) > 2:
+                            form_writer = PyPDF2.PdfWriter()
+                            for i in range(2, len(reader.pages)):
+                                form_writer.add_page(reader.pages[i])
+                            with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                                form_writer.write(t)
+                                new_paths.append(t.name)
+                        else:
+                            # If only 2 pages, the whole thing was calculations
+                            pass
                     else:
                         new_paths.append(pdf_p)
                 except Exception as e:
