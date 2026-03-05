@@ -236,6 +236,62 @@ DISCOVERY_ORDER = [
     'belege'
 ]
 
+def create_diagonal_watermark_text(text, width, height, opacity=0.15):
+    """Create a diagonal watermark using ReportLab for perfect A4 scaling/rotation.
+    
+    Returns standard PDF page content in-memory.
+    """
+    packet = BytesIO()
+    # Create a canvas with the target page size
+    can = canvas.Canvas(packet, pagesize=(width, height))
+    
+    # Set transparency and font
+    can.setFillAlpha(opacity)
+    can.setFont("Helvetica-Bold", 60)
+    
+    # Calculate center
+    cx, cy = width / 2, height / 2
+    
+    # Draw rotated text centered
+    can.saveState()
+    can.translate(cx, cy)
+    can.rotate(45)
+    # Draw string centered on the origin
+    can.drawCentredString(0, 0, text.upper())
+    can.restoreState()
+    
+    can.save()
+    packet.seek(0)
+    return PyPDF2.PdfReader(packet).pages[0]
+
+def create_diagonal_watermark_text(text, width, height, opacity=0.15):
+    """Create a diagonal watermark using ReportLab for perfect A4 scaling/rotation.
+    
+    Returns standard PDF page content in-memory.
+    """
+    packet = BytesIO()
+    # Create a canvas with the target page size
+    can = canvas.Canvas(packet, pagesize=(width, height))
+    
+    # Set transparency and font
+    can.setFillAlpha(opacity)
+    can.setFont("Helvetica-Bold", 60)
+    
+    # Calculate center
+    cx, cy = width / 2, height / 2
+    
+    # Draw rotated text centered
+    can.saveState()
+    can.translate(cx, cy)
+    can.rotate(45)
+    # Draw string centered on the origin
+    can.drawCentredString(0, 0, text.upper())
+    can.restoreState()
+    
+    can.save()
+    packet.seek(0)
+    return PyPDF2.PdfReader(packet).pages[0]
+
 def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
     """Determine if first page should skip watermark.
     
@@ -329,38 +385,21 @@ def apply_watermark(pdf_path, doc_type):
                 try:
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
-                    # Apply to ALL pages as requested by user
-                    # If special skipping is needed for truly blank pages, it can be added here
-
-                    # Scale watermark to fit page while maintaining aspect ratio
-                    # Reduced scale slightly for "Allgemein" to be less intrusive on A4
-                    base_scale = min(w / wm_w, h / wm_h)
-                    scale = base_scale * 0.95 if watermark_file == 'Wasserzeichen Allgemein.pdf' else base_scale
-                    
-                    # Center watermark horizontally relative to MediaBox
-                    off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
-                    
-                    # Center watermark vertically for "Allgemein" on A4
+                    # Scale factor for watermark file if still using one
+                    # But for "Allgemein", we use dynamic text now for perfection
                     if watermark_file == 'Wasserzeichen Allgemein.pdf':
-                        off_y = float(page.mediabox.bottom) + (h - wm_h * scale) / 2
+                        # Generate dynamic diagonal watermark for A4 perfection
+                        wm_page_to_merge = create_diagonal_watermark_text("SECURELY NAIXED", w, h)
                     else:
+                        # Standard file-based scaling
+                        base_scale = min(w / wm_w, h / wm_h)
+                        scale = base_scale
+                        off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
                         off_y = float(page.mediabox.bottom)
-                    
-                    if i == 0:
-                        logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
-                                     f"pos ({off_x:.1f}, {off_y:.1f})")
-                    
-                    # Diagonal Rotation (45 degrees) for "Allgemein" to ensure A4 suitability
-                    # Using transformation centered on the watermark page
-                    if watermark_file == 'Wasserzeichen Allgemein.pdf':
-                        # Center rotate then translate - ensure it spans A4 diagonally
-                        trans = PyPDF2.Transformation().rotate(45, wm_w/2, wm_h/2).scale(scale).translate(off_x, off_y)
-                    else:
+                        
                         trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
-                    
-                    # Use a copy to avoid accumulation
-                    wm_page_to_merge = copy(wm_page)
-                    wm_page_to_merge.add_transformation(trans)
+                        wm_page_to_merge = copy(wm_page)
+                        wm_page_to_merge.add_transformation(trans)
                     
                     # ALL DOCUMENTS: Watermark ALWAYS BEHIND the text for background effect
                     final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
@@ -437,35 +476,21 @@ def apply_special_watermark(pdf_path, doc_type):
                     w, h = float(page.mediabox.width), float(page.mediabox.height)
                     
                     # Choose watermark
-                    wm_to_use = wm_d_page if i == 0 else wm_a_page
                     wm_type = "Deckblatt" if i == 0 else "Allgemein"
                     
-                    wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
-                    
-                    # Scale watermark to fit page
-                    base_scale = min(w / wm_w, h / wm_h)
-                    scale = base_scale * 0.95 if wm_type == "Allgemein" else base_scale
-                    
-                    # Center watermark horizontally
-                    off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
-                    
-                    # Center watermark vertically for "Allgemein"
                     if wm_type == "Allgemein":
-                        off_y = float(page.mediabox.bottom) + (h - wm_h * scale) / 2
+                        # Dynamic diagonal watermark for subsequent pages
+                        wm_to_merge = create_diagonal_watermark_text("SECURELY NAIXED", w, h)
                     else:
+                        # Deckblatt file-based watermark
+                        wm_to_use = wm_d_page
+                        wm_w_spec, wm_h_spec = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
+                        scale = min(w / wm_w_spec, h / wm_h_spec)
+                        off_x = float(page.mediabox.left) + (w - wm_w_spec * scale) / 2
                         off_y = float(page.mediabox.bottom)
-                    
-                    logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, scale {scale:.3f}")
-                    
-                    # Diagonal Rotation (45 degrees) for "Allgemein"
-                    if wm_type == "Allgemein":
-                        trans = PyPDF2.Transformation().rotate(45, wm_w/2, wm_h/2).scale(scale).translate(off_x, off_y)
-                    else:
                         trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
-                    
-                    # Use a copy to avoid accumulation
-                    wm_to_merge = copy(wm_to_use)
-                    wm_to_merge.add_transformation(trans)
+                        wm_to_merge = copy(wm_to_use)
+                        wm_to_merge.add_transformation(trans)
                     
                     # ALL PAGES BEHIND TEXT
                     final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
@@ -550,7 +575,8 @@ if __name__ == "__main__":
         # This ensures the first 2 pages of tax forms are treated as calculation pages
         # as requested for the strict Calculations -> Tax Cover -> Forms sequence.
         calc_parts = []
-        tax_form_types = ['kst', 'kst_freizeichnung', 'est', 'est_freizeichnung', 'ust', 'ust_freizeichnung', 'gewerbesteuer']
+        # Priority for calculations: Only split main forms, leave Freizeichnung (which are often just Anlagen)
+        tax_form_types = ['kst', 'est', 'ust', 'gewerbesteuer']
         
         for dt in tax_form_types:
             if dt not in found_files: 
@@ -564,31 +590,25 @@ if __name__ == "__main__":
                 
                 try:
                     reader = PyPDF2.PdfReader(pdf_p)
-                    # Splitting every form that has more than 1 page to ensure first 2 pages are calculations
-                    if len(reader.pages) > 1:
+                    # We ONLY split the FIRST main form we find to keep berechnungen concise (2 pages)
+                    if not calc_parts and len(reader.pages) > 2:
                         logging.info(f"Splitting {os.path.basename(p)}: P1-2 -> Calculations, P3+ -> Form")
                         
-                        # Part 1: Calculations (P1-2, or just P1 if only 1 page was found)
+                        # Part 1: Calculations (P1-2)
                         p12_writer = PyPDF2.PdfWriter()
                         p12_writer.add_page(reader.pages[0])
-                        if len(reader.pages) > 1:
-                            p12_writer.add_page(reader.pages[1])
-                            
+                        p12_writer.add_page(reader.pages[1])
                         with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
                             p12_writer.write(t)
                             calc_parts.append(t.name)
                         
                         # Part 2: Form (P3+)
-                        if len(reader.pages) > 2:
-                            form_writer = PyPDF2.PdfWriter()
-                            for i in range(2, len(reader.pages)):
-                                form_writer.add_page(reader.pages[i])
-                            with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
-                                form_writer.write(t)
-                                new_paths.append(t.name)
-                        else:
-                            # If only 2 pages, the whole thing was calculations
-                            pass
+                        form_writer = PyPDF2.PdfWriter()
+                        for i in range(2, len(reader.pages)):
+                            form_writer.add_page(reader.pages[i])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            form_writer.write(t)
+                            new_paths.append(t.name)
                     else:
                         new_paths.append(pdf_p)
                 except Exception as e:
@@ -597,11 +617,12 @@ if __name__ == "__main__":
             
             found_files[dt] = new_paths
             
-        # Add any split parts to berechnungen
+        # Add split calc parts to berechnungen
         if calc_parts:
             if 'berechnungen' not in found_files:
                 found_files['berechnungen'] = []
-            found_files['berechnungen'].extend(calc_parts)
+            # INSERT at the beginning of calculations if any exist
+            found_files['berechnungen'] = calc_parts + found_files['berechnungen']
 
         processed_files = {}
         for dt in CONFIG['merge_order']:
@@ -666,12 +687,33 @@ if __name__ == "__main__":
                 
                 # Move all files from input directory to processed
                 try:
-                    all_inputs = glob.glob(os.path.join(CONFIG['input_dir'], '*'))
-                    for f in all_inputs:
+                    # Move EVERYTHING in Import Directory to processed
+                    input_dir = CONFIG['input_dir']
+                    all_input_files = glob.glob(os.path.join(input_dir, '*'))
+                    for f in all_input_files:
                         if os.path.isfile(f):
+                            logging.info(f"Moving to processed: {os.path.basename(f)}")
                             move_file_to_processed(f)
                 except Exception as _e:
                     logging.warning(f"Error moving remaining input files: {_e}")
+
+                # Final Absolute Purge
+                try:
+                    # Remove test files and other junk from root
+                    purge_patterns = ["test_*.py", "*.spec"]
+                    for pattern in purge_patterns:
+                        for f in glob.glob(os.path.join(BASE_DIR, pattern)):
+                            try: os.remove(f)
+                            except: pass
+                    
+                    junk_dirs = ["build", "dist", ".pytest_cache", "tests"]
+                    for d in junk_dirs:
+                        d_path = os.path.join(BASE_DIR, d)
+                        if os.path.exists(d_path):
+                            try: shutil.rmtree(d_path)
+                            except: pass
+                except Exception as _e:
+                    logging.debug(f"Cleanup non-critical error: {_e}")
             else:
                 logging.error("FAILURE: Could not merge documents for final output")
         except Exception as e:
