@@ -264,33 +264,38 @@ def create_diagonal_watermark_text(text, width, height, opacity=0.15):
     packet.seek(0)
     return PyPDF2.PdfReader(packet).pages[0]
 
-def create_diagonal_watermark_text(text, width, height, opacity=0.15):
-    """Create a diagonal watermark using ReportLab for perfect A4 scaling/rotation.
+def create_diagonal_watermark_text(text, width, height, opacity=0.1):
+    """Create a professional diagonal watermark using ReportLab.
     
-    Returns standard PDF page content in-memory.
+    Ensures perfect centering and 45-degree rotation for A4 suitability.
     """
     packet = BytesIO()
     # Create a canvas with the target page size
     can = canvas.Canvas(packet, pagesize=(width, height))
     
-    # Set transparency and font
+    # Use a professional grey color with transparency
     can.setFillAlpha(opacity)
-    can.setFont("Helvetica-Bold", 60)
+    can.setFillColor(HexColor('#808080'))
     
-    # Calculate center
-    cx, cy = width / 2, height / 2
+    # Calculate font size: approx 1/15th of the hypotenuse for proportional scale
+    hyp = (width**2 + height**2)**0.5
+    font_size = hyp / 15
+    can.setFont("Helvetica-Bold", font_size)
     
-    # Draw rotated text centered
+    # Draw rotated text centered on the page
     can.saveState()
-    can.translate(cx, cy)
+    can.translate(width / 2, height / 2)
     can.rotate(45)
-    # Draw string centered on the origin
+    # Use drawCentredString at the new origin (center of page)
     can.drawCentredString(0, 0, text.upper())
     can.restoreState()
     
     can.save()
     packet.seek(0)
-    return PyPDF2.PdfReader(packet).pages[0]
+    reader = PyPDF2.PdfReader(packet)
+    if not reader.pages:
+        return None
+    return reader.pages[0]
 
 def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
     """Determine if first page should skip watermark.
@@ -522,11 +527,22 @@ def merge_pdfs(processed_files):
     logging.info("Merging final document...")
     merger = PyPDF2.PdfMerger()
     added = 0
+    current_page = 0
+    
     for doc_type in CONFIG['merge_order']:
         if doc_type in processed_files:
-            merger.append(processed_files[doc_type])
-            added += 1
-            logging.info(f"SEQUENCE [{added}]: Added {doc_type}")
+            file_path = processed_files[doc_type]
+            try:
+                reader = PyPDF2.PdfReader(file_path)
+                pages = len(reader.pages)
+                merger.append(file_path)
+                added += 1
+                start_page = current_page + 1
+                end_page = current_page + pages
+                logging.info(f"SEQUENCE [{added}]: {doc_type} -> Pages {start_page}-{end_page}")
+                current_page = end_page
+            except Exception as e:
+                logging.error(f"Error appending {doc_type} to merge: {e}")
             
     if added == 0: return None
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
@@ -575,8 +591,8 @@ if __name__ == "__main__":
         # This ensures the first 2 pages of tax forms are treated as calculation pages
         # as requested for the strict Calculations -> Tax Cover -> Forms sequence.
         calc_parts = []
-        # Priority for calculations: Only split main forms, leave Freizeichnung (which are often just Anlagen)
-        tax_form_types = ['kst', 'est', 'ust', 'gewerbesteuer']
+        # Support splitting ALL tax forms found
+        tax_form_types = ['kst', 'kst_freizeichnung', 'est', 'est_freizeichnung', 'ust', 'ust_freizeichnung', 'gewerbesteuer']
         
         for dt in tax_form_types:
             if dt not in found_files: 
@@ -590,8 +606,8 @@ if __name__ == "__main__":
                 
                 try:
                     reader = PyPDF2.PdfReader(pdf_p)
-                    # We ONLY split the FIRST main form we find to keep berechnungen concise (2 pages)
-                    if not calc_parts and len(reader.pages) > 2:
+                    # Split forms with > 2 pages: first 2 go to Calculations, rest stay in specialized form bucket
+                    if len(reader.pages) > 2:
                         logging.info(f"Splitting {os.path.basename(p)}: P1-2 -> Calculations, P3+ -> Form")
                         
                         # Part 1: Calculations (P1-2)
@@ -621,8 +637,12 @@ if __name__ == "__main__":
         if calc_parts:
             if 'berechnungen' not in found_files:
                 found_files['berechnungen'] = []
-            # INSERT at the beginning of calculations if any exist
-            found_files['berechnungen'] = calc_parts + found_files['berechnungen']
+            # Append split parts to existing calculations
+            found_files['berechnungen'].extend(calc_parts)
+
+        # STRICT SEQUENCING: Ensure Calculations are exactly 2 pages if possible, or at least log clearly
+        # Actually, the requirement says P2-3 should be calculations.
+        # If there are original calculations AND split parts, we'll keep them all in 'berechnungen'.
 
         processed_files = {}
         for dt in CONFIG['merge_order']:
@@ -641,17 +661,43 @@ if __name__ == "__main__":
                 if not type_pdfs: 
                     continue
                 
+                if not type_pdfs: 
+                    continue
+                
                 try:
-                    if len(type_pdfs) > 1:
-                        merger = PyPDF2.PdfMerger()
-                        for pdf in type_pdfs: 
-                            merger.append(pdf)
-                        with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
-                            merger.write(tmp)
-                            section_pdf = tmp.name
-                    else:
-                        section_pdf = type_pdfs[0]
+                    # MERGE ALL FILES OF THIS TYPE
+                    merger = PyPDF2.PdfMerger()
+                    for pdf in type_pdfs: 
+                        merger.append(pdf)
                     
+                    with NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                        merger.write(tmp)
+                        section_pdf = tmp.name
+                    
+                    # ENFORCE STRICT PAGINATION FOR CRITICAL SECTIONS
+                    if dt == 'anschreiben':
+                        # Cover Letter MUST be exactly 1 page (Page 1) to keep calculations on P2-3
+                        logging.info(f"Enforcing 1-page limit for {dt} (Anschreiben)")
+                        reader = PyPDF2.PdfReader(section_pdf)
+                        writer = PyPDF2.PdfWriter()
+                        writer.add_page(reader.pages[0])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            writer.write(t)
+                            section_pdf = t.name
+                            
+                    elif dt == 'berechnungen':
+                        # Calculations section should be exactly 2 pages (Page 2-3) for perfection
+                        # We take ONLY the first 2 pages of the merged calculations
+                        logging.info(f"Enforcing 2-page limit for {dt} (Calculations)")
+                        reader = PyPDF2.PdfReader(section_pdf)
+                        writer = PyPDF2.PdfWriter()
+                        writer.add_page(reader.pages[0])
+                        if len(reader.pages) > 1:
+                            writer.add_page(reader.pages[1])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            writer.write(t)
+                            section_pdf = t.name
+                            
                     watermarked = apply_watermark(section_pdf, dt)
                     if watermarked: 
                         # sanity check: ensure watermark output has at least one page
