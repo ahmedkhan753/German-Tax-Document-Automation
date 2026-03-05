@@ -190,27 +190,38 @@ CONFIG = {
             'watermark': 'Wasserzeichen Allgemein.pdf',
             'format': 'pdf'
         },
+        'berechnungen': {
+            'prefixes': ['Berechnung', 'Kalkulation', '440372'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'belege': {
+            'prefixes': ['Beleg', 'Anlage', 'Support', 'Nachweis', 'Dokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
     },
     'merge_order': [
         'anschreiben',
-        'jahresabschluss',
-        'offenlegung',
-        'deckblatt_steuererklaerung', 
+        'berechnungen',
+        'deckblatt_steuererklaerung',
         'kst', 
         'kst_freizeichnung', 
         'ust', 
         'ust_freizeichnung',
         'est',
         'est_freizeichnung',
-        'gewerbesteuer'
+        'gewerbesteuer',
+        'jahresabschluss',
+        'offenlegung',
+        'belege'
     ]
 }
 
 # Priority for file matching to handle overlaps correctly
 DISCOVERY_ORDER = [
     'anschreiben',
-    'jahresabschluss',
-    'offenlegung',
+    'berechnungen',
     'deckblatt_steuererklaerung',
     'kst_freizeichnung',
     'kst',
@@ -218,7 +229,10 @@ DISCOVERY_ORDER = [
     'ust',
     'est_freizeichnung',
     'est',
-    'gewerbesteuer'
+    'gewerbesteuer',
+    'jahresabschluss',
+    'offenlegung',
+    'belege'
 ]
 
 def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
@@ -318,7 +332,9 @@ def apply_watermark(pdf_path, doc_type):
                     # If special skipping is needed for truly blank pages, it can be added here
 
                     # Scale watermark to fit page while maintaining aspect ratio
-                    scale = min(w / wm_w, h / wm_h)
+                    # Reduced scale slightly for "Allgemein" to be less intrusive on A4
+                    base_scale = min(w / wm_w, h / wm_h)
+                    scale = base_scale * 0.95 if watermark_file == 'Wasserzeichen Allgemein.pdf' else base_scale
                     
                     # Center watermark horizontally relative to MediaBox
                     off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
@@ -426,7 +442,8 @@ def apply_special_watermark(pdf_path, doc_type):
                     wm_w, wm_h = float(wm_to_use.mediabox.width), float(wm_to_use.mediabox.height)
                     
                     # Scale watermark to fit page
-                    scale = min(w / wm_w, h / wm_h)
+                    base_scale = min(w / wm_w, h / wm_h)
+                    scale = base_scale * 0.95 if wm_type == "Allgemein" else base_scale
                     
                     # Center watermark relative to MediaBox
                     off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
@@ -589,10 +606,14 @@ if __name__ == "__main__":
                 print(f"{'='*70}\n")
                 logging.info(f"SUCCESS: Final output generated at {final}")
                 
-                # Move all discovered files to processed
-                for dt, files in found_files.items():
-                    for f in files:
-                        move_file_to_processed(f)
+                # Move all files from input directory to processed
+                try:
+                    all_inputs = glob.glob(os.path.join(CONFIG['input_dir'], '*'))
+                    for f in all_inputs:
+                        if os.path.isfile(f):
+                            move_file_to_processed(f)
+                except Exception as _e:
+                    logging.warning(f"Error moving remaining input files: {_e}")
             else:
                 logging.error("FAILURE: Could not merge documents for final output")
         except Exception as e:
