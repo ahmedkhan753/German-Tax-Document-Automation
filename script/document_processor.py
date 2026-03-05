@@ -10,6 +10,7 @@ from reportlab.lib.pagesizes import letter
 from reportlab.lib.colors import HexColor
 from io import BytesIO
 import sys
+import shutil
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -88,7 +89,7 @@ def move_file_to_processed(file_path):
             destination = os.path.join(CONFIG['processed_dir'], f"{base}_{counter}{ext}")
             counter += 1
         
-        os.rename(file_path, destination)
+        shutil.move(file_path, destination)
         logging.info(f"✓ Moved to processed: {filename}")
         return destination
     except Exception as e:
@@ -112,7 +113,7 @@ def move_file_to_error(file_path, error_message=""):
             destination = os.path.join(CONFIG['error_dir'], f"{base}_{counter}{ext}")
             counter += 1
         
-        os.rename(file_path, destination)
+        shutil.move(file_path, destination)
         logging.error(f"✗ Moved to error folder: {filename} | Reason: {error_message}")
         return destination
     except Exception as e:
@@ -349,7 +350,12 @@ def apply_watermark(pdf_path, doc_type):
                         logging.info(f"  Page {i+1}: Size {w:.0f}x{h:.0f}, scale {scale:.3f}, "
                                      f"pos ({off_x:.1f}, {off_y:.1f})")
                     
-                    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+                    # Diagonal Rotation (45 degrees) for "Allgemein" to ensure A4 suitability
+                    # Using transformation centered on the watermark page
+                    if watermark_file == 'Wasserzeichen Allgemein.pdf':
+                        trans = PyPDF2.Transformation().rotate(45, wm_w/2, wm_h/2).scale(scale).translate(off_x, off_y)
+                    else:
+                        trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
                     # Use a copy to avoid accumulation
                     wm_page_to_merge = copy(wm_page)
@@ -450,7 +456,11 @@ def apply_special_watermark(pdf_path, doc_type):
                     
                     logging.info(f"  Page {i+1} ({wm_type}): Size {w:.0f}x{h:.0f}, scale {scale:.3f}")
                     
-                    trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
+                    # Diagonal Rotation (45 degrees) for "Allgemein"
+                    if wm_type == "Allgemein":
+                        trans = PyPDF2.Transformation().rotate(45, wm_w/2, wm_h/2).scale(scale).translate(off_x, off_y)
+                    else:
+                        trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
                     
                     # Use a copy to avoid accumulation
                     wm_to_merge = copy(wm_to_use)
@@ -535,6 +545,56 @@ if __name__ == "__main__":
         for doc_type, files in found_files.items():
             print(f"  ✓ {doc_type}: {len(files)} file(s)")
         
+        # PRE-PROCESS: Split Tax Form Calculations
+        # This ensures the first 2 pages of tax forms are treated as calculation pages
+        # as requested for the strict Calculations -> Tax Cover -> Forms sequence.
+        calc_parts = []
+        tax_form_types = ['kst', 'kst_freizeichnung', 'est', 'est_freizeichnung', 'ust', 'ust_freizeichnung', 'gewerbesteuer']
+        
+        for dt in tax_form_types:
+            if dt not in found_files: 
+                continue
+            
+            new_paths = []
+            for p in found_files[dt]:
+                pdf_p = convert_to_pdf(p)
+                if not pdf_p: 
+                    continue
+                
+                try:
+                    reader = PyPDF2.PdfReader(pdf_p)
+                    if len(reader.pages) > 2:
+                        logging.info(f"Splitting {os.path.basename(p)}: P1-2 -> Calculations, P3+ -> Form")
+                        
+                        # Part 1: Calculations (P1-2)
+                        p12_writer = PyPDF2.PdfWriter()
+                        p12_writer.add_page(reader.pages[0])
+                        p12_writer.add_page(reader.pages[1])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            p12_writer.write(t)
+                            calc_parts.append(t.name)
+                        
+                        # Part 2: Form (P3+)
+                        form_writer = PyPDF2.PdfWriter()
+                        for i in range(2, len(reader.pages)):
+                            form_writer.add_page(reader.pages[i])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            form_writer.write(t)
+                            new_paths.append(t.name)
+                    else:
+                        new_paths.append(pdf_p)
+                except Exception as e:
+                    logging.warning(f"Failed to split tax form {p}: {e}")
+                    new_paths.append(pdf_p)
+            
+            found_files[dt] = new_paths
+            
+        # Add any split parts to berechnungen
+        if calc_parts:
+            if 'berechnungen' not in found_files:
+                found_files['berechnungen'] = []
+            found_files['berechnungen'].extend(calc_parts)
+
         processed_files = {}
         for dt in CONFIG['merge_order']:
             if dt not in found_files: 
