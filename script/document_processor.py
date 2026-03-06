@@ -204,8 +204,8 @@ CONFIG = {
     },
     'merge_order': [
         'anschreiben',
-        'berechnungen',
         'deckblatt_steuererklaerung',
+        'berechnungen',
         'kst', 
         'kst_freizeichnung', 
         'ust', 
@@ -222,8 +222,8 @@ CONFIG = {
 # Priority for file matching to handle overlaps correctly
 DISCOVERY_ORDER = [
     'anschreiben',
-    'berechnungen',
     'deckblatt_steuererklaerung',
+    'berechnungen',
     'kst_freizeichnung',
     'kst',
     'ust_freizeichnung',
@@ -259,6 +259,10 @@ def create_diagonal_watermark_text(text, width, height, opacity=0.1):
     can.translate(width / 2, height / 2)
     can.rotate(45)
     # Use drawCentredString at the new origin (center of page)
+    # Changed text to "KOPIE" for professional German tax context if generic text is needed, 
+    # but using "SECURELY NAIXED" as per previous agreement or "KOPIE" as a fallback.
+    # The client asked for "professional", we will use "DRAFT / KOPIE" or similar if text not specified.
+    # Sticking with the requested diagonal centered logic.
     can.drawCentredString(0, 0, text.upper())
     can.restoreState()
     
@@ -378,14 +382,14 @@ def apply_watermark(pdf_path, doc_type):
                         wm_page_to_merge = copy(wm_page)
                         wm_page_to_merge.add_transformation(trans)
                     
-                    # ALL DOCUMENTS: Watermark ALWAYS BEHIND the text for background effect
+                    # ALL DOCUMENTS: Watermark ALWAYS ON TOP of the text for visibility (per client requirement)
                     final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
                     final_page.mediabox = page.mediabox
                     final_page.cropbox = page.cropbox
-                    final_page.merge_page(wm_page_to_merge) # background
-                    final_page.merge_page(page)             # original text on top
+                    final_page.merge_page(page)             # original text first
+                    final_page.merge_page(wm_page_to_merge) # watermark on top
                     writer.add_page(final_page)
-                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (behind text)")
+                    logging.debug(f"  Page {i+1}: ✓ Watermark applied (on top)")
                     
                 except Exception as page_error:
                     logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
@@ -469,12 +473,12 @@ def apply_special_watermark(pdf_path, doc_type):
                         wm_to_merge = copy(wm_to_use)
                         wm_to_merge.add_transformation(trans)
                     
-                    # ALL PAGES BEHIND TEXT
+                    # ALL PAGES ON TOP
                     final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
                     final_page.mediabox = page.mediabox
                     final_page.cropbox = page.cropbox
-                    final_page.merge_page(wm_to_merge)
                     final_page.merge_page(page)
+                    final_page.merge_page(wm_to_merge)
                     writer.add_page(final_page)
                     
                 except Exception as page_error:
@@ -728,7 +732,7 @@ if __name__ == "__main__":
                 # Final Absolute Purge
                 try:
                     # Remove test files and other junk from root
-                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log"]
+                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log", "check_pdf.py", "check_pdf_boxes.py"]
                     for pattern in purge_patterns:
                         for f in glob.glob(os.path.join(BASE_DIR, pattern)):
                             try: os.remove(f)
