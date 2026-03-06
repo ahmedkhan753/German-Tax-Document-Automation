@@ -670,36 +670,7 @@ if __name__ == "__main__":
                         merger.write(tmp)
                         section_pdf = tmp.name
                     
-                    # ENFORCE STRICT PAGINATION FOR CRITICAL SECTIONS
-                    if dt == 'anschreiben':
-                        # Cover Letter MUST be exactly 1 page (Page 1) to keep calculations on P2-3
-                        logging.info(f"Enforcing 1-page limit for {dt} (Anschreiben)")
-                        reader = PyPDF2.PdfReader(section_pdf)
-                        writer = PyPDF2.PdfWriter()
-                        writer.add_page(reader.pages[0])
-                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
-                            writer.write(t)
-                            section_pdf = t.name
-                            
-                    elif dt == 'berechnungen':
-                        # Calculations section MUST be exactly 2 pages (Page 2-3) for perfection
-                        # If more, we trim. If less, we pad with a blank page.
-                        logging.info(f"Enforcing 2-page limit/pad for {dt} (Calculations)")
-                        reader = PyPDF2.PdfReader(section_pdf)
-                        writer = PyPDF2.PdfWriter()
-                        writer.add_page(reader.pages[0])
-                        if len(reader.pages) > 1:
-                            writer.add_page(reader.pages[1])
-                        else:
-                            # Pad with a blank page to ensure Divider is Page 4
-                            logging.info("Padding Calculations with a blank page to protect Page 4 Divider")
-                            writer.add_blank_page(width=float(reader.pages[0].mediabox.width), 
-                                                height=float(reader.pages[0].mediabox.height))
-                        
-                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
-                            writer.write(t)
-                            section_pdf = t.name
-                            
+                    # ENFORCE WATERMARK (No page trimming/padding here anymore to avoid data loss)
                     watermarked = apply_watermark(section_pdf, dt)
                     if watermarked: 
                         # sanity check: ensure watermark output has at least one page
