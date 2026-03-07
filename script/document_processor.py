@@ -220,6 +220,7 @@ CONFIG = {
 }
 
 # Priority for file matching to handle overlaps correctly
+# Sequence: [0] Cover Letter, [1] Cover Page, [2] Calculations
 DISCOVERY_ORDER = [
     'anschreiben',
     'deckblatt_steuererklaerung',
@@ -236,42 +237,96 @@ DISCOVERY_ORDER = [
     'belege'
 ]
 
-def create_diagonal_watermark_text(text, width, height, opacity=0.1):
-    """Create a professional diagonal watermark using ReportLab.
+def _create_watermark_pdf_file(text="KOPIE", width=595.27, height=841.89):
+    """Create a watermark PDF as a TEMP FILE on disk (not BytesIO).
     
-    Ensures perfect centering and 45-degree rotation for A4 suitability.
+    This avoids garbage collection issues where BytesIO-backed PdfReader
+    page objects lose their backing stream when the function scope exits.
+    Returns the path to the temp file.
     """
-    packet = BytesIO()
-    # Create a canvas with the target page size
-    can = canvas.Canvas(packet, pagesize=(width, height))
+    with NamedTemporaryFile(suffix='_watermark.pdf', delete=False) as tmp:
+        tmp_path = tmp.name
     
-    # Use a professional grey color with transparency
-    can.setFillAlpha(opacity)
-    can.setFillColor(HexColor('#808080'))
-    
-    # Calculate font size: approx 1/15th of the hypotenuse for proportional scale
-    hyp = (width**2 + height**2)**0.5
-    font_size = hyp / 15
-    can.setFont("Helvetica-Bold", font_size)
-    
-    # Draw rotated text centered on the page
+    can = canvas.Canvas(tmp_path, pagesize=(width, height))
     can.saveState()
+    # Set transparency FIRST, then color (proper ReportLab order)
+    can.setFillAlpha(0.3)
+    can.setFillColorRGB(0.5, 0.5, 0.5)
+    can.setFont("Helvetica-Bold", 80)
     can.translate(width / 2, height / 2)
     can.rotate(45)
-    # Use drawCentredString at the new origin (center of page)
-    # Changed text to "KOPIE" for professional German tax context if generic text is needed, 
-    # but using "SECURELY NAIXED" as per previous agreement or "KOPIE" as a fallback.
-    # The client asked for "professional", we will use "DRAFT / KOPIE" or similar if text not specified.
-    # Sticking with the requested diagonal centered logic.
     can.drawCentredString(0, 0, text.upper())
     can.restoreState()
-    
     can.save()
-    packet.seek(0)
-    reader = PyPDF2.PdfReader(packet)
-    if not reader.pages:
-        return None
-    return reader.pages[0]
+    
+    logging.info(f"Watermark PDF created at: {tmp_path}")
+    return tmp_path
+
+def apply_global_watermark(pdf_path):
+    """Apply the diagonal 'KOPIE' watermark to every page from Page 3 (Index 2) onwards.
+    
+    This is the SINGLE SOURCE OF TRUTH for watermarks on explanation/calculation pages.
+    Uses a temp file on disk for the watermark to avoid BytesIO garbage collection issues.
+    Creates a fresh copy of the watermark page for each merge to avoid PyPDF2 mutation.
+    """
+    try:
+        reader = PyPDF2.PdfReader(pdf_path)
+        total_pages = len(reader.pages)
+        logging.info(f"apply_global_watermark: Processing {total_pages} pages, watermarking from Page 3 onwards...")
+        
+        if total_pages < 3:
+            logging.warning(f"Only {total_pages} pages - nothing to watermark (need at least 3)")
+            return True
+        
+        # Get page dimensions from first page
+        first_page = reader.pages[0]
+        w = float(first_page.mediabox.width)
+        h = float(first_page.mediabox.height)
+        
+        # Create the watermark as a real file on disk
+        wm_file_path = _create_watermark_pdf_file("KOPIE", w, h)
+        
+        # Keep the watermark reader alive in this scope
+        wm_reader = PyPDF2.PdfReader(wm_file_path)
+        
+        writer = PyPDF2.PdfWriter()
+        watermarked_count = 0
+        
+        for i, page in enumerate(reader.pages):
+            if i >= 2:  # Page 3 onwards (Index 2)
+                # Create a FRESH COPY of watermark page for each merge
+                # (PyPDF2 can mutate page objects during merge_page)
+                wm_page_copy = copy(wm_reader.pages[0])
+                
+                page_w = float(page.mediabox.width)
+                page_h = float(page.mediabox.height)
+                final_page = PyPDF2.PageObject.create_blank_page(width=page_w, height=page_h)
+                final_page.mediabox = page.mediabox
+                # Watermark as UNDERLAY (behind text)
+                final_page.merge_page(wm_page_copy)
+                final_page.merge_page(page)
+                writer.add_page(final_page)
+                watermarked_count += 1
+            else:
+                # Pages 1-2: Cover Letter and Cover Page - no watermark
+                writer.add_page(page)
+        
+        # Write the watermarked document back
+        with open(pdf_path, 'wb') as f:
+            writer.write(f)
+        
+        # Cleanup temp watermark file
+        try:
+            os.remove(wm_file_path)
+        except:
+            pass
+        
+        logging.info(f"apply_global_watermark: SUCCESS - Watermarked {watermarked_count} pages (Page 3 to {total_pages})")
+        return True
+        
+    except Exception as e:
+        logging.error(f"apply_global_watermark: FAILED - {e}", exc_info=True)
+        return False
 
 def should_skip_first_page_watermark(doc_type, pdf_path, page_obj):
     """Determine if first page should skip watermark.
@@ -327,100 +382,51 @@ def convert_to_pdf(file_path):
         return None
 
 def apply_watermark(pdf_path, doc_type):
+    """Apply section-specific file-based watermarks (logos/headers) ONLY for
+    anschreiben and deckblatt. All other sections skip per-section watermarks;
+    they receive the global diagonal 'KOPIE' watermark after merging."""
     watermark_file = CONFIG['document_types'][doc_type].get('watermark')
-    if not watermark_file:
-        logging.info(f"No watermark configured for '{doc_type}'; skipping watermark application.")
+    
+    # Only apply file-based logo watermarks for Cover Letter and Cover Page.
+    # Everything else (berechnungen, est, kst, etc.) will be handled by
+    # apply_global_watermark() after the final merge — this prevents the old
+    # horizontal 'Wasserzeichen Allgemein.pdf' from appearing.
+    if doc_type not in ('anschreiben', 'deckblatt_steuererklaerung'):
+        logging.info(f"Skipping per-section watermark for '{doc_type}' (handled by global watermark)")
         return pdf_path
-
-    if watermark_file == 'special':
-        return apply_special_watermark(pdf_path, doc_type)
+    
+    if not watermark_file or watermark_file == 'special':
+        return pdf_path
     
     watermark_path = os.path.join(CONFIG['watermark_dir'], watermark_file)
-    
-    # Validate watermark file exists
     if not os.path.exists(watermark_path):
-        logging.error(f"✗ CRITICAL: Watermark file not found: {watermark_path}")
-        logging.error(f"   Expected location: {watermark_path}")
-        return None
+        logging.error(f"Watermark not found: {watermark_path}")
+        return pdf_path
     
     try:
-        logging.info(f"Applying watermark '{watermark_file}' to {doc_type}...")
-        with open(pdf_path, 'rb') as pdf_file, open(watermark_path, 'rb') as wm_file:
-            pdf_reader = PyPDF2.PdfReader(pdf_file)
-            wm_pdf = PyPDF2.PdfReader(wm_file)
+        logging.info(f"Applying logo watermark '{watermark_file}' to {doc_type}...")
+        reader = PyPDF2.PdfReader(pdf_path)
+        writer = PyPDF2.PdfWriter()
+        wm_reader = PyPDF2.PdfReader(watermark_path)
+        wm_page = wm_reader.pages[0]
+        
+        for i, page in enumerate(reader.pages):
+            w, h = float(page.mediabox.width), float(page.mediabox.height)
+            final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
+            final_page.mediabox = page.mediabox
             
-            if len(wm_pdf.pages) == 0:
-                logging.error(f"✗ Watermark PDF is empty: {watermark_file}")
-                return None
+            # File-based watermarks (logos) go in the background
+            final_page.merge_page(wm_page)
+            final_page.merge_page(page)
+            writer.add_page(final_page)
             
-            wm_page = wm_pdf.pages[0]
-            writer = PyPDF2.PdfWriter()
-            
-            wm_w, wm_h = float(wm_page.mediabox.width), float(wm_page.mediabox.height)
-            logging.debug(f"  Watermark dimensions: {wm_w:.1f}x{wm_h:.1f}")
-            
-            page_count = len(pdf_reader.pages)
-            logging.debug(f"  Processing {page_count} pages...")
-
-            for i, page in enumerate(pdf_reader.pages):
-                try:
-                    w, h = float(page.mediabox.width), float(page.mediabox.height)
-                    
-                    # Scale factor for watermark file if still using one
-                    # But for "Allgemein", we use dynamic text now for perfection
-                    if watermark_file == 'Wasserzeichen Allgemein.pdf':
-                        # Generate dynamic diagonal watermark for A4 perfection
-                        wm_page_to_merge = create_diagonal_watermark_text("KOPIE", w, h)
-                        is_dynamic = True
-                    else:
-                        # Standard file-based scaling
-                        is_dynamic = False
-                        base_scale = min(w / wm_w, h / wm_h)
-                        scale = base_scale
-                        off_x = float(page.mediabox.left) + (w - wm_w * scale) / 2
-                        off_y = float(page.mediabox.bottom)
-                        
-                        trans = PyPDF2.Transformation().scale(scale).translate(off_x, off_y)
-                        wm_page_to_merge = copy(wm_page)
-                        wm_page_to_merge.add_transformation(trans)
-                    
-                    final_page = PyPDF2.PageObject.create_blank_page(width=w, height=h)
-                    final_page.mediabox = page.mediabox
-                    final_page.cropbox = page.cropbox
-                    
-                    if is_dynamic:
-                        # Dynamic diagonal watermark: merge ON TOP (it is semi-transparent)
-                        final_page.merge_page(page)             # original text first
-                        final_page.merge_page(wm_page_to_merge) # watermark on top
-                        logging.debug(f"  Page {i+1}: ✓ Dynamic watermark applied (on top)")
-                    else:
-                        # File-based watermark (specific to Anschreiben/Deckblatt):
-                        # Merge BEHIND to avoid hiding text if the watermark PDF is opaque
-                        final_page.merge_page(wm_page_to_merge) # background
-                        final_page.merge_page(page)             # original text on top
-                        logging.debug(f"  Page {i+1}: ✓ File watermark applied (behind)")
-                        
-                    writer.add_page(final_page)
-                    
-                except Exception as page_error:
-                    logging.error(f"  ✗ Error processing page {i+1}: {page_error}")
-                    # Fall back to original page without watermark for this page
-                    writer.add_page(page)
-
-            # Write watermarked PDF to temporary file
-            with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
-                writer.write(output)
-                output_path = output.name
-            
-            logging.info(f"✓ Watermark applied successfully: {watermark_file}")
-            return output_path
-            
+        with NamedTemporaryFile(suffix='.pdf', delete=False) as output:
+            writer.write(output)
+            logging.info(f"✓ Logo watermark applied to {doc_type}")
+            return output.name
     except Exception as e:
-        logging.error(f"✗ CRITICAL: Watermarking failed for {doc_type}: {e}")
-        logging.error(f"   Watermark file: {watermark_path}")
-        logging.error(f"   PDF file: {pdf_path}")
-        logging.error(f"   Error details: {str(e)}")
-        return None
+        logging.error(f"Error applying section watermark for {doc_type}: {e}")
+        return pdf_path
 
 def apply_special_watermark(pdf_path, doc_type):
     """Apply special watermarks (directly onto content pages for visibility)
@@ -472,7 +478,12 @@ def apply_special_watermark(pdf_path, doc_type):
                     
                     if wm_type == "Allgemein":
                         # Dynamic diagonal watermark for subsequent pages
-                        wm_to_merge = create_diagonal_watermark_text("KOPIE", w, h)
+                        # Create via temp file to avoid BytesIO GC issues
+                        _tmp_wm = _create_watermark_pdf_file("KOPIE", w, h)
+                        _tmp_wm_reader = PyPDF2.PdfReader(_tmp_wm)
+                        wm_to_merge = copy(_tmp_wm_reader.pages[0])
+                        try: os.remove(_tmp_wm)
+                        except: pass
                         is_dynamic_spec = True
                     else:
                         # Deckblatt file-based watermark
@@ -490,14 +501,9 @@ def apply_special_watermark(pdf_path, doc_type):
                     final_page.mediabox = page.mediabox
                     final_page.cropbox = page.cropbox
                     
-                    if is_dynamic_spec:
-                        # ON TOP for dynamic
-                        final_page.merge_page(page)
-                        final_page.merge_page(wm_to_merge)
-                    else:
-                        # BEHIND for file-based
-                        final_page.merge_page(wm_to_merge)
-                        final_page.merge_page(page)
+                    # ALL SPECIAL DOCUMENTS: Underlay layering
+                    final_page.merge_page(wm_to_merge)
+                    final_page.merge_page(page)
                         
                     writer.add_page(final_page)
                     
@@ -519,32 +525,40 @@ def apply_special_watermark(pdf_path, doc_type):
         logging.error(f"   Error details: {str(e)}")
         return None
 
-def merge_pdfs(processed_files):
-    logging.info("Merging final document...")
+def merge_pdfs_strict(processed_files):
+    """Enforce the modular sequence: [Cover Letter] -> [Cover Page] -> [Explanations] -> [Forms]."""
+    logging.info("Merging final document in strict sequence...")
     merger = PyPDF2.PdfMerger()
     added = 0
-    current_page = 0
     
+    # 1. Position 0: Cover Letter (Anschreiben)
+    if 'anschreiben' in processed_files:
+        merger.append(processed_files['anschreiben'])
+        added += 1
+        logging.info("SEQUENCE [1]: anschreiben (Page 1)")
+        
+    # 2. Position 1: Cover Page (Deckblatt) - Page 2
+    if 'deckblatt_steuererklaerung' in processed_files:
+        merger.append(processed_files['deckblatt_steuererklaerung'])
+        added += 1
+        logging.info("SEQUENCE [2]: deckblatt_steuererklaerung (Page 2)")
+        
+    # 3. Position 2+: Explanations & Remaining Sections
+    # Use the rest of CONFIG['merge_order'] for forms and others
     for doc_type in CONFIG['merge_order']:
-        if doc_type in processed_files:
-            file_path = processed_files[doc_type]
-            try:
-                reader = PyPDF2.PdfReader(file_path)
-                pages = len(reader.pages)
-                merger.append(file_path)
-                added += 1
-                start_page = current_page + 1
-                end_page = current_page + pages
-                logging.info(f"SEQUENCE [{added}]: {doc_type} -> Pages {start_page}-{end_page}")
-                current_page = end_page
-            except Exception as e:
-                logging.error(f"Error appending {doc_type} to merge: {e}")
+        if doc_type not in ['anschreiben', 'deckblatt_steuererklaerung'] and doc_type in processed_files:
+            merger.append(processed_files[doc_type])
+            added += 1
+            logging.info(f"SEQUENCE [{added}]: {doc_type} (Page 3+)")
             
     if added == 0: return None
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
     with open(output_path, 'wb') as f:
         merger.write(f)
     merger.close()
+    
+    # APPLY GLOBAL WATERMARK TO THE MERGED FILE (starting from Page 3)
+    apply_global_watermark(output_path)
     
     return output_path
 
@@ -670,7 +684,27 @@ if __name__ == "__main__":
                         merger.write(tmp)
                         section_pdf = tmp.name
                     
-                    # ENFORCE WATERMARK (No page trimming/padding here anymore to avoid data loss)
+                    # ENFORCE STRICT PAGINATION TO LOCK SEQUENCE
+                    if dt == 'anschreiben':
+                        # Cover Letter MUST be exactly 1 page (Page 1) 
+                        logging.info(f"Enforcing 1-page limit for {dt} (Anschreiben)")
+                        reader = PyPDF2.PdfReader(section_pdf)
+                        writer = PyPDF2.PdfWriter()
+                        writer.add_page(reader.pages[0])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            writer.write(t)
+                            section_pdf = t.name
+                            
+                    elif dt == 'deckblatt_steuererklaerung':
+                        # Cover Page MUST be exactly 1 page (Page 2)
+                        logging.info(f"Enforcing 1-page limit for {dt} (Cover Page)")
+                        reader = PyPDF2.PdfReader(section_pdf)
+                        writer = PyPDF2.PdfWriter()
+                        writer.add_page(reader.pages[0])
+                        with NamedTemporaryFile(suffix='.pdf', delete=False) as t:
+                            writer.write(t)
+                            section_pdf = t.name
+                            
                     watermarked = apply_watermark(section_pdf, dt)
                     if watermarked: 
                         # sanity check: ensure watermark output has at least one page
@@ -696,7 +730,7 @@ if __name__ == "__main__":
                 logging.warning(f"Document type '{dt}' was discovered but not included in final output")
         
         try:
-            final = merge_pdfs(processed_files)
+            final = merge_pdfs_strict(processed_files)
             if final: 
                 print(f"\n{'='*70}")
                 print(f"✓ SUCCESS - Final document created:")
@@ -704,29 +738,26 @@ if __name__ == "__main__":
                 print(f"{'='*70}\n")
                 logging.info(f"SUCCESS: Final output generated at {final}")
                 
-                # Move all files from input directory to processed
+                # COMPREHENSIVE CLEANUP (Move all input types to processed)
                 try:
-                    # Move EVERYTHING in Import Directory to processed
                     input_dir = CONFIG['input_dir']
-                    all_input_files = glob.glob(os.path.join(input_dir, '*'))
-                    for f in all_input_files:
-                        if os.path.isfile(f):
+                    extensions = ['*.pdf', '*.docx', '*.xlsx', '*.png', '*.jpg', '*.jpeg', '*.xls', '*.doc']
+                    for ext in extensions:
+                        for f in glob.glob(os.path.join(input_dir, ext)):
                             logging.info(f"Moving to processed: {os.path.basename(f)}")
                             move_file_to_processed(f)
-                        elif os.path.isdir(f) and os.path.basename(f).lower() not in ['processed', 'error']:
-                            # Move directories too if any stray ones exist
-                            try: shutil.move(f, os.path.join(CONFIG['processed_dir'], os.path.basename(f)))
-                            except: pass
                 except Exception as _e:
                     logging.warning(f"Error moving remaining input files: {_e}")
 
                 # Final Absolute Purge
                 try:
                     # Remove test files and other junk from root
-                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log", "check_pdf.py", "check_pdf_boxes.py"]
+                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log", "check_pdf.py", "check_pdf_boxes.py", "temp_*", "*.tmp"]
                     for pattern in purge_patterns:
                         for f in glob.glob(os.path.join(BASE_DIR, pattern)):
-                            try: os.remove(f)
+                            try: 
+                                if os.path.isfile(f): os.remove(f)
+                                elif os.path.isdir(f): shutil.rmtree(f)
                             except: pass
                     
                     junk_dirs = ["build", "dist", ".pytest_cache", "tests", "__pycache__"]
