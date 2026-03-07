@@ -250,9 +250,10 @@ def _create_watermark_pdf_file(text="KOPIE", width=595.27, height=841.89):
     can = canvas.Canvas(tmp_path, pagesize=(width, height))
     can.saveState()
     # Set transparency FIRST, then color (proper ReportLab order)
-    can.setFillAlpha(0.3)
-    can.setFillColorRGB(0.5, 0.5, 0.5)
-    can.setFont("Helvetica-Bold", 80)
+    # Use 0.15 alpha for professional semi-transparent overlay on A4
+    can.setFillAlpha(0.15)
+    can.setFillColorRGB(0.4, 0.4, 0.4)
+    can.setFont("Helvetica-Bold", 100)
     can.translate(width / 2, height / 2)
     can.rotate(45)
     can.drawCentredString(0, 0, text.upper())
@@ -501,9 +502,14 @@ def apply_special_watermark(pdf_path, doc_type):
                     final_page.mediabox = page.mediabox
                     final_page.cropbox = page.cropbox
                     
-                    # ALL SPECIAL DOCUMENTS: Underlay layering
-                    final_page.merge_page(wm_to_merge)
-                    final_page.merge_page(page)
+                    if is_dynamic_spec:
+                        # Dynamic diagonal KOPIE: OVERLAY (content first, watermark on top)
+                        final_page.merge_page(page)
+                        final_page.merge_page(wm_to_merge)
+                    else:
+                        # Deckblatt file-based watermark: Underlay (logo behind content)
+                        final_page.merge_page(wm_to_merge)
+                        final_page.merge_page(page)
                         
                     writer.add_page(final_page)
                     
@@ -526,39 +532,106 @@ def apply_special_watermark(pdf_path, doc_type):
         return None
 
 def merge_pdfs_strict(processed_files):
-    """Enforce the modular sequence: [Cover Letter] -> [Cover Page] -> [Explanations] -> [Forms]."""
-    logging.info("Merging final document in strict sequence...")
-    merger = PyPDF2.PdfMerger()
-    added = 0
+    """Merge documents in strict sequence with INLINE watermark application.
     
-    # 1. Position 0: Cover Letter (Anschreiben)
+    Sequence: [Cover Letter] -> [Cover Page] -> [Explanations] -> [Forms]
+    
+    Watermarks are applied PAGE BY PAGE during the merge (not as a post-step).
+    Every page at index >= 2 gets the diagonal 'KOPIE' watermark as an underlay.
+    This makes it IMPOSSIBLE for watermarks to be missing due to a silent failure.
+    """
+    logging.info("=" * 60)
+    logging.info("MERGE START: Building final document with inline watermarks")
+    logging.info("=" * 60)
+    
+    # Step 1: Build the ordered list of PDF file paths
+    ordered_pdfs = []
+    
+    # Position 0: Cover Letter (Anschreiben) - Page 1
     if 'anschreiben' in processed_files:
-        merger.append(processed_files['anschreiben'])
-        added += 1
-        logging.info("SEQUENCE [1]: anschreiben (Page 1)")
-        
-    # 2. Position 1: Cover Page (Deckblatt) - Page 2
+        ordered_pdfs.append(('anschreiben', processed_files['anschreiben']))
+        logging.info("SEQUENCE [1]: anschreiben (Cover Letter)")
+    
+    # Position 1: Cover Page (Deckblatt) - Page 2
     if 'deckblatt_steuererklaerung' in processed_files:
-        merger.append(processed_files['deckblatt_steuererklaerung'])
-        added += 1
-        logging.info("SEQUENCE [2]: deckblatt_steuererklaerung (Page 2)")
-        
-    # 3. Position 2+: Explanations & Remaining Sections
-    # Use the rest of CONFIG['merge_order'] for forms and others
+        ordered_pdfs.append(('deckblatt_steuererklaerung', processed_files['deckblatt_steuererklaerung']))
+        logging.info("SEQUENCE [2]: deckblatt_steuererklaerung (Cover Page)")
+    
+    # Position 2+: Explanations & Remaining Sections
+    seq_num = 3
     for doc_type in CONFIG['merge_order']:
         if doc_type not in ['anschreiben', 'deckblatt_steuererklaerung'] and doc_type in processed_files:
-            merger.append(processed_files[doc_type])
-            added += 1
-            logging.info(f"SEQUENCE [{added}]: {doc_type} (Page 3+)")
+            ordered_pdfs.append((doc_type, processed_files[doc_type]))
+            logging.info(f"SEQUENCE [{seq_num}]: {doc_type} (Page 3+)")
+            seq_num += 1
+    
+    if not ordered_pdfs:
+        logging.error("No documents to merge!")
+        return None
+    
+    # Step 2: Page-by-page merge with inline watermark (OVERLAY mode)
+    # Watermark is applied ON TOP of content so it's visible even on pages
+    # with opaque white backgrounds.  Each page gets a fresh watermark
+    # sized to its exact dimensions for dynamic A4 / mixed-page support.
+    writer = PyPDF2.PdfWriter()
+    global_page_index = 0
+    watermarked_count = 0
+    
+    for doc_type, pdf_path in ordered_pdfs:
+        try:
+            section_reader = PyPDF2.PdfReader(pdf_path)
+            section_pages = len(section_reader.pages)
+            logging.info(f"  Adding {doc_type}: {section_pages} page(s) starting at global index {global_page_index}")
             
-    if added == 0: return None
+            for j, page in enumerate(section_reader.pages):
+                if global_page_index >= 2:
+                    # PAGE 3+ : Apply diagonal watermark as OVERLAY
+                    pw = float(page.mediabox.width)
+                    ph = float(page.mediabox.height)
+                    
+                    # Create a fresh watermark temp file sized to THIS page
+                    _wm_tmp = _create_watermark_pdf_file("KOPIE", pw, ph)
+                    _wm_reader = PyPDF2.PdfReader(_wm_tmp)
+                    wm_page = copy(_wm_reader.pages[0])
+                    try:
+                        os.remove(_wm_tmp)
+                    except Exception:
+                        pass
+                    
+                    # Build composited page: content FIRST, watermark ON TOP
+                    final_page = PyPDF2.PageObject.create_blank_page(width=pw, height=ph)
+                    final_page.mediabox = page.mediabox
+                    final_page.merge_page(page)       # original content first
+                    final_page.merge_page(wm_page)    # watermark OVERLAY on top
+                    writer.add_page(final_page)
+                    watermarked_count += 1
+                    logging.info(f"    Page {global_page_index + 1}: WATERMARKED (diagonal KOPIE overlay)")
+                else:
+                    # PAGE 1-2: No watermark (Cover Letter / Cover Page)
+                    writer.add_page(page)
+                    logging.info(f"    Page {global_page_index + 1}: Clean (no watermark)")
+                
+                global_page_index += 1
+                
+        except Exception as e:
+            logging.error(f"  ERROR processing {doc_type}: {e}", exc_info=True)
+    
+    # Step 4: Write final output
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
     with open(output_path, 'wb') as f:
-        merger.write(f)
-    merger.close()
+        writer.write(f)
     
-    # APPLY GLOBAL WATERMARK TO THE MERGED FILE (starting from Page 3)
-    apply_global_watermark(output_path)
+    # Cleanup temp watermark file
+    try:
+        os.remove(wm_file_path)
+    except:
+        pass
+    
+    logging.info("=" * 60)
+    logging.info(f"MERGE COMPLETE: {global_page_index} total pages, {watermarked_count} watermarked")
+    logging.info(f"  Pages 1-2: Clean | Pages 3-{global_page_index}: Diagonal 'KOPIE' watermark")
+    logging.info(f"  Output: {output_path}")
+    logging.info("=" * 60)
     
     return output_path
 
@@ -738,38 +811,48 @@ if __name__ == "__main__":
                 print(f"{'='*70}\n")
                 logging.info(f"SUCCESS: Final output generated at {final}")
                 
-                # COMPREHENSIVE CLEANUP (Move all input types to processed)
+                # COMPREHENSIVE CLEANUP (Move ALL input files to processed)
                 try:
                     input_dir = CONFIG['input_dir']
-                    extensions = ['*.pdf', '*.docx', '*.xlsx', '*.png', '*.jpg', '*.jpeg', '*.xls', '*.doc']
-                    for ext in extensions:
-                        for f in glob.glob(os.path.join(input_dir, ext)):
-                            logging.info(f"Moving to processed: {os.path.basename(f)}")
-                            move_file_to_processed(f)
+                    # Move every file in input directory (catch-all approach)
+                    if os.path.isdir(input_dir):
+                        for item in os.listdir(input_dir):
+                            item_path = os.path.join(input_dir, item)
+                            # Skip subdirectories (processed/, error/) 
+                            if os.path.isdir(item_path):
+                                continue
+                            logging.info(f"Moving to processed: {item}")
+                            move_file_to_processed(item_path)
                 except Exception as _e:
                     logging.warning(f"Error moving remaining input files: {_e}")
 
                 # Final Absolute Purge
                 try:
-                    # Remove test files and other junk from root
-                    purge_patterns = ["test_*.py", "*.spec", "run_log.txt", "run_log_*.txt", "check_pages.py", "*.log", "check_pdf.py", "check_pdf_boxes.py", "temp_*", "*.tmp"]
+                    # Remove test files, check scripts, sample files, and other junk from root
+                    purge_patterns = [
+                        "test_*.py", "check_*.py", "sample_*",
+                        "*.spec", "*.log", "*.tmp",
+                        "run_log.txt", "run_log_*.txt",
+                        "temp_*"
+                    ]
                     for pattern in purge_patterns:
                         for f in glob.glob(os.path.join(BASE_DIR, pattern)):
                             try: 
                                 if os.path.isfile(f): os.remove(f)
                                 elif os.path.isdir(f): shutil.rmtree(f)
-                            except: pass
+                                logging.info(f"Purged: {os.path.basename(f)}")
+                            except Exception:
+                                pass
                     
                     junk_dirs = ["build", "dist", ".pytest_cache", "tests", "__pycache__"]
                     for d in junk_dirs:
                         d_path = os.path.join(BASE_DIR, d)
                         if os.path.exists(d_path):
-                            try: shutil.rmtree(d_path)
-                            except: pass
-                            
-                    # Clean up any leftover temporary files from reportlab/PyPDF2
-                    temp_dir = os.environ.get('TEMP', '/tmp')
-                    # We won't purge system temp, but we ensured all our NamedTemporaryFiles were deleted by OS eventually
+                            try:
+                                shutil.rmtree(d_path)
+                                logging.info(f"Purged directory: {d}")
+                            except Exception:
+                                pass
                 except Exception as _e:
                     logging.debug(f"Cleanup non-critical error: {_e}")
             else:
