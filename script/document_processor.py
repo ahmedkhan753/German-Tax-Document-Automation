@@ -138,84 +138,57 @@ CONFIG = {
             'watermark': 'Wasserzeichen Anschreiben.pdf', 
             'format': 'docx'
         },
-        'jahresabschluss': {
-            'prefixes': ['JA Jahresabschluss', 'JA Abschluss', 'Jahresabschluss', 'Bilanz', 'E-Bilanz', '439111'], 
-            'watermark': 'special', 
-            'format': 'pdf'
-        },
-        'offenlegung': {
-            'prefixes': ['JA Offenlegung'], 
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'deckblatt_steuererklaerung': {
-            'prefixes': ['Deckblatt', 'Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'AP Deckblatt', 'JA AP', 'Deckblatt StE'], 
+        'deckblatt': {
+            'prefixes': ['Deckblatt', 'Deckblatt Steuer', 'Deckblatt Word', '440368', 'Cover', 'AP Deckblatt', 'JA AP', 'Deckblatt StE', 'deckblatt_steuererklaerung'], 
             'watermark': 'Wasserzeichen Deckblatt.pdf', 
             'format': 'docx'
-        },
-        'kst': {
-            'prefixes': ['KSt Erklärung'], 
-            'exclude': ['Freizeichnungsdokument'],
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'kst_freizeichnung': {
-            'prefixes': ['KSt Erklärung Freizeichnungsdokument'], 
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'est': {
-            'prefixes': ['ESt Erklärung', 'Einkommensteuer', 'Est-Erklärung'], 
-            'exclude': ['Freizeichnungsdokument'],
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'est_freizeichnung': {
-            'prefixes': ['ESt Erklärung Freizeichnungsdokument', 'Est-Erklärung Freizeichnungsdokument', '439224'], 
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'ust': {
-            'prefixes': ['USt Erklärung'], 
-            'exclude': ['Freizeichnungsdokument'],
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'ust_freizeichnung': {
-            'prefixes': ['USt Erklärung Freizeichnungsdokument'], 
-            'watermark': 'Wasserzeichen Allgemein.pdf', 
-            'format': 'pdf'
-        },
-        'gewerbesteuer': {
-            'prefixes': ['GewSt', 'Gewerbesteuer'],
-            'watermark': 'Wasserzeichen Allgemein.pdf',
-            'format': 'pdf'
         },
         'berechnungen': {
             'prefixes': ['Berechnung', 'Kalkulation', '440372', 'Overview', 'Summary'], 
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
-        'belege': {
-            'prefixes': ['Beleg', 'Anlage', 'Support', 'Nachweis', 'Dokument'], 
+        'kst': {
+            'prefixes': ['KSt Erklärung', 'KSt ', 'KSt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'ust': {
+            'prefixes': ['USt Erklärung', 'USt ', 'USt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'est': {
+            'prefixes': ['ESt Erklärung', 'Einkommensteuer', 'Est-Erklärung', 'ESt ', 'ESt Erklärung Freizeichnungsdokument'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'jahresabschluss': {
+            'prefixes': ['JA Jahresabschluss', 'JA Abschluss', 'Jahresabschluss', 'Bilanz', 'E-Bilanz', '439111'], 
+            'watermark': 'special', 
+            'format': 'pdf'
+        },
+        'anlagen': {
+            'prefixes': ['Anlage', 'JA Offenlegung', 'Offenlegung'], 
+            'watermark': 'Wasserzeichen Allgemein.pdf', 
+            'format': 'pdf'
+        },
+        'attachments': {
+            'prefixes': ['Beleg', 'Support', 'Nachweis', 'Dokument', 'Attachment'], 
             'watermark': 'Wasserzeichen Allgemein.pdf', 
             'format': 'pdf'
         },
     },
     'merge_order': [
         'anschreiben',
-        'deckblatt_steuererklaerung',
+        'deckblatt',
         'berechnungen',
-        'kst', 
-        'kst_freizeichnung', 
-        'ust', 
-        'ust_freizeichnung',
+        'kst',
+        'ust',
         'est',
-        'est_freizeichnung',
-        'gewerbesteuer',
         'jahresabschluss',
-        'offenlegung',
-        'belege'
+        'anlagen',
+        'attachments'
     ]
 }
 
@@ -223,18 +196,14 @@ CONFIG = {
 # Sequence: [0] Cover Letter, [1] Cover Page, [2] Calculations
 DISCOVERY_ORDER = [
     'anschreiben',
-    'deckblatt_steuererklaerung',
+    'deckblatt',
     'berechnungen',
-    'kst_freizeichnung',
     'kst',
-    'ust_freizeichnung',
     'ust',
-    'est_freizeichnung',
     'est',
-    'gewerbesteuer',
     'jahresabschluss',
-    'offenlegung',
-    'belege'
+    'anlagen',
+    'attachments'
 ]
 
 def _create_watermark_pdf_file(text="KOPIE", width=595.27, height=841.89):
@@ -531,105 +500,93 @@ def apply_special_watermark(pdf_path, doc_type):
         logging.error(f"   Error details: {str(e)}")
         return None
 
+def get_watermark_page(page):
+    """Generate dynamic KOPIE watermark matching page size exactly."""
+    pw = float(page.mediabox.width)
+    ph = float(page.mediabox.height)
+    
+    with NamedTemporaryFile(suffix='_watermark.pdf', delete=False) as tmp:
+        tmp_path = tmp.name
+    
+    can = canvas.Canvas(tmp_path, pagesize=(pw, ph))
+    can.saveState()
+    can.setFillAlpha(0.15)
+    can.setFillColorRGB(0.4, 0.4, 0.4)
+    
+    # Scale font proportionally to page width (e.g., width / 6) to fit "KOPIE" nicely diagonally
+    font_size = pw / 6.0
+    can.setFont("Helvetica-Bold", font_size)
+    can.translate(pw / 2, ph / 2)
+    can.rotate(45)
+    can.drawCentredString(0, 0, "KOPIE")
+    can.restoreState()
+    can.save()
+    
+    wm_reader = PyPDF2.PdfReader(tmp_path)
+    wm_page = copy(wm_reader.pages[0])
+    
+    try:
+        os.remove(tmp_path)
+    except Exception:
+        pass
+        
+    return wm_page
+
 def merge_pdfs_strict(processed_files):
-    """Merge documents in strict sequence with INLINE watermark application.
-    
-    Sequence: [Cover Letter] -> [Cover Page] -> [Explanations] -> [Forms]
-    
-    Watermarks are applied PAGE BY PAGE during the merge (not as a post-step).
-    Every page at index >= 2 gets the diagonal 'KOPIE' watermark as an underlay.
-    This makes it IMPOSSIBLE for watermarks to be missing due to a silent failure.
-    """
+    """Merge documents in strict sequence with Hybrid Z-Order Watermarking."""
     logging.info("=" * 60)
-    logging.info("MERGE START: Building final document with inline watermarks")
+    logging.info("MERGE START: Building final document with hybrid Z-order watermarks")
     logging.info("=" * 60)
     
-    # Step 1: Build the ordered list of PDF file paths
     ordered_pdfs = []
-    
-    # Position 0: Cover Letter (Anschreiben) - Page 1
-    if 'anschreiben' in processed_files:
-        ordered_pdfs.append(('anschreiben', processed_files['anschreiben']))
-        logging.info("SEQUENCE [1]: anschreiben (Cover Letter)")
-    
-    # Position 1: Cover Page (Deckblatt) - Page 2
-    if 'deckblatt_steuererklaerung' in processed_files:
-        ordered_pdfs.append(('deckblatt_steuererklaerung', processed_files['deckblatt_steuererklaerung']))
-        logging.info("SEQUENCE [2]: deckblatt_steuererklaerung (Cover Page)")
-    
-    # Position 2+: Explanations & Remaining Sections
-    seq_num = 3
     for doc_type in CONFIG['merge_order']:
-        if doc_type not in ['anschreiben', 'deckblatt_steuererklaerung'] and doc_type in processed_files:
+        if doc_type in processed_files:
             ordered_pdfs.append((doc_type, processed_files[doc_type]))
-            logging.info(f"SEQUENCE [{seq_num}]: {doc_type} (Page 3+)")
-            seq_num += 1
-    
+            logging.info(f"SEQUENCE: {doc_type} added to merge")
+            
     if not ordered_pdfs:
         logging.error("No documents to merge!")
         return None
-    
-    # Step 2: Page-by-page merge with inline watermark (OVERLAY mode)
-    # Watermark is applied ON TOP of content so it's visible even on pages
-    # with opaque white backgrounds.  Each page gets a fresh watermark
-    # sized to its exact dimensions for dynamic A4 / mixed-page support.
-    writer = PyPDF2.PdfWriter()
-    global_page_index = 0
-    watermarked_count = 0
+        
+    output_writer = PyPDF2.PdfWriter()
+    all_pages = []
     
     for doc_type, pdf_path in ordered_pdfs:
         try:
-            section_reader = PyPDF2.PdfReader(pdf_path)
-            section_pages = len(section_reader.pages)
-            logging.info(f"  Adding {doc_type}: {section_pages} page(s) starting at global index {global_page_index}")
-            
-            for j, page in enumerate(section_reader.pages):
-                if global_page_index >= 2:
-                    # PAGE 3+ : Apply diagonal watermark as OVERLAY
-                    pw = float(page.mediabox.width)
-                    ph = float(page.mediabox.height)
-                    
-                    # Create a fresh watermark temp file sized to THIS page
-                    _wm_tmp = _create_watermark_pdf_file("KOPIE", pw, ph)
-                    _wm_reader = PyPDF2.PdfReader(_wm_tmp)
-                    wm_page = copy(_wm_reader.pages[0])
-                    try:
-                        os.remove(_wm_tmp)
-                    except Exception:
-                        pass
-                    
-                    # Build composited page: content FIRST, watermark ON TOP
-                    final_page = PyPDF2.PageObject.create_blank_page(width=pw, height=ph)
-                    final_page.mediabox = page.mediabox
-                    final_page.merge_page(page)       # original content first
-                    final_page.merge_page(wm_page)    # watermark OVERLAY on top
-                    writer.add_page(final_page)
-                    watermarked_count += 1
-                    logging.info(f"    Page {global_page_index + 1}: WATERMARKED (diagonal KOPIE overlay)")
-                else:
-                    # PAGE 1-2: No watermark (Cover Letter / Cover Page)
-                    writer.add_page(page)
-                    logging.info(f"    Page {global_page_index + 1}: Clean (no watermark)")
-                
-                global_page_index += 1
-                
+            reader = PyPDF2.PdfReader(pdf_path)
+            all_pages.extend(reader.pages)
         except Exception as e:
             logging.error(f"  ERROR processing {doc_type}: {e}", exc_info=True)
-    
-    # Step 4: Write final output
+            
+    for page_index, page in enumerate(all_pages):
+        pw = float(page.mediabox.width)
+        ph = float(page.mediabox.height)
+        final_page = PyPDF2.PageObject.create_blank_page(width=pw, height=ph)
+        final_page.mediabox = page.mediabox
+        
+        watermark_page = get_watermark_page(page)
+        
+        if page_index == 0:
+            # Page 1 (Cover Letter / Anschreiben)
+            # Apply watermark as UNDERLAY — merge watermark first, then content on top
+            final_page.merge_page(watermark_page)
+            final_page.merge_page(page)
+            logging.info(f"    Page {page_index + 1}: UNDERLAY KOPIE (Cover Letter)")
+        else:
+            # Page 2+ (Cover Page, Tax Forms, Calculations, etc.)
+            # Apply watermark as OVERLAY — merge watermark on top of content
+            final_page.merge_page(page)
+            final_page.merge_page(watermark_page)
+            logging.info(f"    Page {page_index + 1}: OVERLAY KOPIE")
+            
+        output_writer.add_page(final_page)
+
     output_path = os.path.join(CONFIG['output_dir'], 'final_output.pdf')
     with open(output_path, 'wb') as f:
-        writer.write(f)
-    
-    # Cleanup temp watermark file
-    try:
-        os.remove(wm_file_path)
-    except:
-        pass
+        output_writer.write(f)
     
     logging.info("=" * 60)
-    logging.info(f"MERGE COMPLETE: {global_page_index} total pages, {watermarked_count} watermarked")
-    logging.info(f"  Pages 1-2: Clean | Pages 3-{global_page_index}: Diagonal 'KOPIE' watermark")
+    logging.info(f"MERGE COMPLETE: {len(all_pages)} total pages")
     logging.info(f"  Output: {output_path}")
     logging.info("=" * 60)
     
@@ -675,7 +632,7 @@ if __name__ == "__main__":
         # as requested for the strict Calculations -> Tax Cover -> Forms sequence.
         calc_parts = []
         # Support splitting ALL tax forms found
-        tax_form_types = ['kst', 'kst_freizeichnung', 'est', 'est_freizeichnung', 'ust', 'ust_freizeichnung', 'gewerbesteuer']
+        tax_form_types = ['kst', 'est', 'ust']
         
         for dt in tax_form_types:
             if dt not in found_files: 
@@ -768,7 +725,7 @@ if __name__ == "__main__":
                             writer.write(t)
                             section_pdf = t.name
                             
-                    elif dt == 'deckblatt_steuererklaerung':
+                    elif dt == 'deckblatt':
                         # Cover Page MUST be exactly 1 page (Page 2)
                         logging.info(f"Enforcing 1-page limit for {dt} (Cover Page)")
                         reader = PyPDF2.PdfReader(section_pdf)
@@ -778,18 +735,8 @@ if __name__ == "__main__":
                             writer.write(t)
                             section_pdf = t.name
                             
-                    watermarked = apply_watermark(section_pdf, dt)
-                    if watermarked: 
-                        # sanity check: ensure watermark output has at least one page
-                        try:
-                            pages = len(PyPDF2.PdfReader(watermarked).pages)
-                            if pages == 0:
-                                logging.warning(f"Watermarked file for {dt} has no pages")
-                        except Exception:
-                            logging.warning(f"Could not read page count of watermarked file for {dt}")
-                        processed_files[dt] = watermarked
-                    else:
-                        logging.error(f"Watermarking failed for {dt}")
+                    # Watermarking is now handled purely during strict merge phase
+                    processed_files[dt] = section_pdf
                 except Exception as e:
                     logging.error(f"Error processing document type {dt}: {e}")
                     continue
@@ -830,7 +777,7 @@ if __name__ == "__main__":
                 try:
                     # Remove test files, check scripts, sample files, and other junk from root
                     purge_patterns = [
-                        "test_*.py", "check_*.py", "sample_*",
+                        "test_*.py", "check_*.py", "sample_*", "debug_*",
                         "*.spec", "*.log", "*.tmp",
                         "run_log.txt", "run_log_*.txt",
                         "temp_*"
