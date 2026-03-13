@@ -26,7 +26,7 @@ def get_base_path():
         # Go up one level to get project root
         exe_dir = os.path.dirname(sys.executable)  # dist/
         project_root = os.path.dirname(exe_dir)     # project_root/
-        logging.debug(f"Running as EXE - Project root: {project_root}"
+        logging.debug(f"Running as EXE - Project root: {project_root}")
         return project_root
     # Running as Python script
     script_dir = os.path.dirname(os.path.abspath(__file__))  # script/
